@@ -59,76 +59,29 @@ class Point:
         self.b = b #integrated bacprojection power
 
 class Cloud:
-    '''
-    def can_join(self, other):
-        return isinstance(other, Cloud) and is_adjacent(self.Points, other.points) 
-    '''
+    #See https://docs.python.org/2/tutorial/datastructures.html for List-like Sytax and Usage
+
+    def to_ImageHDU(self):
+        hdr = fits.Header()
+        hdr['MIN_X'] = self.min_x
+        hdr['MIN_Y'] = self.min_y
+        return fits.ImageHDU(data=self.mask, header=hdr)
+
     def __init__(self, list_of_points):
+
         self.Points = set(filter(lambda p: isinstance(p, Point), list_of_points))
         self.min_x = min([point.x for point in self.Points])
         self.min_y = min([point.y for point in self.Points])    
         mask_shape = (1+max([point.x for point in self.Points])-self.min_x, 1+max([point.y for point in self.Points])-self.min_y)
-        self.mask = np.zeros(mask_shape)
+        self.mask = np.zeros(mask_shape, dtype=int)
         for point in self.Points:
-            self.mask[point.x-self.min_x][point.y-self.min_y] = float(point.b)
-        '''
-        self.mask = np.zeros( 1+max([point.x for point in self.Points])-self.min_x, 1+max([point.y for point in self.Points])-self.min_y, *self.Points[0].datashape)
-        for point in self.Points:
-            self.mask[point.x-self.min_x][point.y-self.min_y][:] = point.data[:]
-        '''
-
+            self.mask[point.x-self.min_x][point.y-self.min_y] = 1 
 
 #-----------------------------------------------------------------------------------------
 # Rough Code
 #-----------------------------------------------------------------------------------------
+
 '''
-def isolate_some(backproj, can_join=is_adjacent, join=combine_lists):
-	masks = [] #list of cloud masks of the form (x, y, 2Dimage)
-	
-    processed = list() #Empty list of lists
-    points = np.transpose(np.nonzero(backproj)) #Iterable of points
-    while (size(points) > size(processed)):
-        new_cloud = list(points.pop())
-        for old_cloud in processed:
-            if can_join(new_cloud, old_cloud):
-                join()
-
-
-
-
-	from collections import deque
-	U = deque() #universal set of all possible clouds, each represented by a set of points
-	
-	for point in np.transpose(np.nonzero(backproj)):
-		cloud = [point]  
-		unionable = filter(lambda x: can_union(x,cloud), U)
-		for y in unionable:
-			U.remove(y)
-		U.append(reduce(lambda x,y: x.extend(y)))
-	
-	old_count = 0
-	while old_count < size(U):
-		new_count = 0
-		a = U.pop()
-		while (new_count + old_count) < size(U):
-			for i in range(old_count:size(U)-new_count):
-				if can_union(a, U[i]):
-					
-
-		for (i, b) in enumerate(U[count:]):
-			if can_union(a, b):
-				a.extend(b)
-
-def isolate_all(xyt_filename):
-    hdu_list = fits.open(xyt_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
-    header = hdu_list[0].header
-    data = hdu_list[1].data
-    Hi = data['hi'] 
-    Hj = data['hj'] 
-    Hthets = data['hthets']
-
-
-
 import matplotlib
 matplotlib.use('TKAgg')
 from matplotlib import pyplot as plt
@@ -139,33 +92,18 @@ for cloud in list_of_Clouds:
     canvas[cloud.min_x:][cloud.min_y:] += cloud.mask
     plt.clf()
     plt.plot(canvas)
-    
-#Command Line Set Refinement
-processed = list()
-while len(unprocessed) > 0:
-    sys.stdout.write('\rRefining {0} sets... '.format(len(unprocessed)))
+'''
+
+'''
+#STDOUT Progress Reporting
+while not done:
+    sys.stdout.write('\rSay {0} to {1}!'.format(zeroth, first))
     sys.stdout.flush()
-    new_cloud = unprocessed.pop()
-    #no_match = True
-    matches = list()
-    #for old_cloud in unprocessed:
-    for i, old_cloud in enumerate(unprocessed):
-        if can_join(old_cloud, new_cloud):
-            old_cloud.extend(new_cloud) #old_cloud grows to include all points in new_cloud
-            #no_match = False
-            matches.append(i)
-    #if no_match:
-    if len(matches) is 0:    
-        processed.append(new_cloud)
-    else:
-        #unprocessed = map(list, map(set, unprocessed))
-        for i in matches:
-            unprocessed[i] = list(set(unprocessed[i]))
-sys.stdout.write('\rIdentified {0} clouds!'.format(len(processed)))
+    #DO this_tuff
+    #done?
+sys.stdout.write('\rDone with {0}!'.format(this_stuff))
 sys.stdout.flush()
 print ''
-
-
 '''
 
 #-----------------------------------------------------------------------------------------
@@ -204,12 +142,12 @@ def isolate_all(xyt_filename):
                 matches.append(i)
         while len(matches) > 0:
             new_cloud.extend(unprocessed.pop(matches.pop()))
-        unprocessed.append(new_cloud) #list(set(new_cloud))) #TODO DUPLICATES
+        unprocessed.append(new_cloud) 
         progress = math.pow(1.0-(len(raw_points)/problem_size), 2) #O(n**2)
         if 0.0 < progress < 1.0:
             rht.update_progress(progress=progress, message='Unioning '+str(len(raw_points))+' points:') 
     unprocessed.sort(key=len, reverse=True)
-    rht.update_progress(1.0, final_message='Finished unioning '+str(problem_size)+'into '+str(len(unprocessed))+' sets! Time Elapsed:')
+    rht.update_progress(1.0, final_message='Finished unioning '+str(problem_size)+' points into '+str(len(unprocessed))+' sets! Time Elapsed:')
     
     if DEBUG:
         debug_data=map(len, unprocessed)
@@ -222,12 +160,7 @@ def isolate_all(xyt_filename):
     def make_a_Cloud(list_of_points):
         return Cloud(map(make_a_Point, list_of_points))
 
-    def make_an_ImageHDU(cloud):
-        hdr = fits.Header()
-        hdr['MIN_X'] = cloud.min_x
-        hdr['MIN_Y'] = cloud.min_y
-        return fits.ImageHDU(data=cloud.mask, header=hdr)
-    list_of_HDUs = map(make_an_ImageHDU, map(make_a_Cloud, unprocessed))
+    list_of_HDUs = map(Cloud.to_ImageHDU, map(make_a_Cloud, unprocessed))
     #list_of_HDUs.sort(key=lambda hdu: hdu.data.size, reverse=True)
     
     #Output HDUList to File
