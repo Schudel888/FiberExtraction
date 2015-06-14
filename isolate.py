@@ -51,22 +51,34 @@ def is_adjacent(clouda, cloudb):
                 return True
     return False
 
+'''
 class Point:
 
     def __init__(self, x, y, b):
         self.x = x #x coordinate in backprojection
         self.y = y #y coordinate in backprojection
         self.b = b #integrated bacprojection power
-
+'''
 class Cloud:
     #See https://docs.python.org/2/tutorial/datastructures.html for List-like Sytax and Usage
+    def make_mask(self):
+        mask_shape = (1+max([point[0] for point in self.points])-self.min_x, 1+max([point[1] for point in self.points])-self.min_y)
+        self.mask = np.zeros(mask_shape, dtype=int)
+        for point in self.points:
+            self.mask[point[0]-self.min_x][point[1]-self.min_y] = 1 
 
     def to_ImageHDU(self):
         hdr = fits.Header()
-        hdr['MIN_X'] = self.min_x
-        hdr['MIN_Y'] = self.min_y
+        hdr['MIN_X'] = (self.min_x, 'Lower-left x-coordinate of mask in backprojection')
+        hdr['MIN_Y'] = (self.min_y, 'Lower-left y-coordinate of mask in backprojection')
+        self.make_mask()
+        hdr['AREA'] = (self.mask.size, 'Area covered by this mask')
+        hdr['LITPIX'] = (np.count_nonzero(self.mask), 'Number of nonzero pixels in the mask')
         return fits.ImageHDU(data=self.mask, header=hdr)
+    
 
+
+    '''
     def __init__(self, list_of_points):
 
         self.Points = set(filter(lambda p: isinstance(p, Point), list_of_points))
@@ -76,6 +88,36 @@ class Cloud:
         self.mask = np.zeros(mask_shape, dtype=int)
         for point in self.Points:
             self.mask[point.x-self.min_x][point.y-self.min_y] = 1 
+    '''
+    def __init__(self, list_of_points):
+        #Expects a python list of two-integer tuples, corresponding the the x,y coordinate of the points original location in the backprojection 
+
+        if isinstance(list_of_points, tuple):
+            list_of_points = [list_of_points]
+        if isinstance(list_of_points, set):
+            list_of_points = list(list_of_points)
+        if isinstance(list_of_points, Cloud):
+            list_of_points = list_of_points.points
+        
+        def proper_formatting(given):
+            if not isinstance(given, list):
+                raise TypeError('Cloud cannot be constructed from the given datatype: '+str(type(given)))
+            if len(given) is 0:
+                raise ValueError('Cloud must contain at least one point')
+            for point in given:
+                if not isinstance(point, tuple):
+                    raise TypeError('All points in a cloud must be coordinate tuples')
+                if len(point) != 2:
+                    raise ValueError('Points must be tuples of length 2')
+                if not (isinstance(point[0], np.int64) and isinstance(point[1], np.int64)):
+                    raise TypeError('Points must contain integer coordinates'+repr(point))
+            return True
+        assert proper_formatting(list_of_points)
+
+        self.points = list(set(list_of_points))
+        self.min_x = min([point[0] for point in self.points])
+        self.min_y = min([point[1] for point in self.points])    
+        #self.make_mask()
 
 #-----------------------------------------------------------------------------------------
 # Rough Code
@@ -118,7 +160,7 @@ def isolate_all(xyt_filename):
     assert SUFFIX not in xyt_filename
     print 'Accessing: '+xyt_filename+' '
     hdu_list = fits.open(xyt_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
-    #header = hdu_list[0].header
+    header = hdu_list[0].header
     backproj = hdu_list[0].data
     #Hi = hdu_list[1].data['hi'] 
     #Hj = hdu_list[1].data['hj'] 
@@ -154,18 +196,21 @@ def isolate_all(xyt_filename):
         print debug_data
 
     #Convert lists of two-integer tuples into ImageHDUs
+    '''
     def make_a_Point((x,y)):
         return Point(x, y, backproj[x][y])
-
+    
     def make_a_Cloud(list_of_points):
         return Cloud(map(make_a_Point, list_of_points))
-
-    list_of_HDUs = map(Cloud.to_ImageHDU, map(make_a_Cloud, unprocessed))
-    #list_of_HDUs.sort(key=lambda hdu: hdu.data.size, reverse=True)
     
+    list_of_HDUs = map(Cloud.to_ImageHDU, map(make_a_Cloud, unprocessed))
+    '''
+    list_of_HDUs = map(Cloud.to_ImageHDU, map(Cloud, unprocessed))
+    #list_of_HDUs.sort(key=lambda hdu: hdu.header['AREA'], reverse=True)
+
     #Output HDUList to File
     output_hdulist = fits.HDUList(list_of_HDUs)
-    output_hdulist.insert(0, hdu_list[0].copy()) #fits.PrimaryHDU(data=backproj, header=header)) #TODO Introduces Errors in Reading FITS File 
+    output_hdulist.insert(0, fits.PrimaryHDU(data=backproj)) #header=header[6:-2])) #hdu_list[0].copy()) #TODO Introduces Errors in Reading FITS File 
     output_filename = string.join(string.rsplit(xyt_filename, '.', 1), SUFFIX)
     output_hdulist.writeto(output_filename, output_verify='silentfix', clobber=True, checksum=True)
     print 'Results successfully output to '+output_filename
