@@ -10,7 +10,7 @@ from astropy.io import fits
 from argparse import ArgumentParser
 from argparse import ArgumentDefaultsHelpFormatter
 
-#import scipy.ndimage
+import scipy.ndimage.filters as filta
 import math
 #import os
 import sys
@@ -112,7 +112,7 @@ class Cloud:
                 if not (isinstance(point[0], np.int64) and isinstance(point[1], np.int64)):
                     raise TypeError('Points must contain integer coordinates'+repr(point))
             return True
-        assert proper_formatting(list_of_points)
+        #assert proper_formatting(list_of_points)
 
         self.points = list(set(list_of_points))
         self.min_x = min([point[0] for point in self.points])
@@ -160,8 +160,10 @@ def isolate_all(xyt_filename):
     assert SUFFIX not in xyt_filename
     print 'Accessing: '+xyt_filename+' '
     hdu_list = fits.open(xyt_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
-    header = hdu_list[0].header
+    #header = hdu_list[0].header
     backproj = hdu_list[0].data
+    #wlen = header['WLEN']
+    #ntheta = header['NTHETA']
     #Hi = hdu_list[1].data['hi'] 
     #Hj = hdu_list[1].data['hj'] 
     #Hthets = hdu_list[1].data['hthets']
@@ -205,16 +207,57 @@ def isolate_all(xyt_filename):
     
     list_of_HDUs = map(Cloud.to_ImageHDU, map(make_a_Cloud, unprocessed))
     '''
-    list_of_HDUs = map(Cloud.to_ImageHDU, map(Cloud, unprocessed))
+    list_of_Clouds = map(Cloud, unprocessed)
+    list_of_HDUs = map(Cloud.to_ImageHDU, list_of_Clouds) #map(Cloud, unprocessed))
     #list_of_HDUs.sort(key=lambda hdu: hdu.header['AREA'], reverse=True)
 
     #Output HDUList to File
     output_hdulist = fits.HDUList(list_of_HDUs)
-    output_hdulist.insert(0, fits.PrimaryHDU(data=backproj)) #header=header[6:-2])) #hdu_list[0].copy()) #TODO Introduces Errors in Reading FITS File 
+    output_hdulist.insert(0, fits.PrimaryHDU(data=backproj, header=fits.Header())) #header=header[6:-2])) #hdu_list[0].copy()) #TODO Introduces Errors in Reading FITS File 
     output_filename = string.join(string.rsplit(xyt_filename, '.', 1), SUFFIX)
     output_hdulist.writeto(output_filename, output_verify='silentfix', clobber=True, checksum=True)
     print 'Results successfully output to '+output_filename
     #return output_filename
+
+    return
+
+    '''
+    #Unfinished Methods.......................................................................
+    def xyt(point):
+        (x,y) = point
+        #This would go a lot faster if the RHT sorted output by x coordinate
+        for i in range(ntheta):
+            if (Hi[i] == x) and (Hj[i] == y):
+                return Hthets[i]
+        return np.zeros(ntheta)
+
+    SIGMA = int(ntheta/16.0) #TODO What fraction of pi should be covered in 1StandardDeviation?
+    xyt_double_helix = rht.all_thetas(wlen, np.linspace(0.0, np.pi, ntheta), True)
+    filtered_xyt_double_helix = filta.gaussian_filter1d(xyt_double_helix, SIGMA, axis=2, mode='wrap')
+    def weights(displacement):
+        try:
+            arr = filtered_xyt_double_helix[displacement[0]+wlen//2][displacement[1]+wlen//2]
+        except Exception:
+            arr = np.zeros(ntheta)
+            temp_theta = math.atan2(math.abs(displacement[1]), displacement[0])
+            temp_index = int(math.floor((ntheta-1)*temp_theta/math.pi))
+            arr[temp_index] = 1 #math.sqrt(ntheta/math.pi) #TODO Normalization???
+            filta.gaussian_filter1d(arr, SIGMA, mode='wrap', output=arr)
+        finally:
+            temp_sum = np.sum(np.multiply(arr,arr))/2.0
+            return np.divide(arr, temp_sum) #TODO Scaling Area to 1?
+
+    def synergy_between(pointa, pointb):
+        if pointa is pointb:
+            return 0.0
+        displacement = (pointa[0]-pointb[0], pointa[1]-pointb[1])
+        r2 = (displacement[0]**2 + displacement[1]**2)/(wlen**2)
+        athets = 
+
+
+    print 'Beginning Fiber Refinement...'
+    '''
+
         
 #-----------------------------------------------------------------------------------------
 # Command Line Mode
