@@ -19,6 +19,7 @@ import string
 #import shutil
 #import time 
 #import fnmatch
+import copy
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -36,6 +37,36 @@ DEBUG = True
 # Initialization: Object Definitions
 #-----------------------------------------------------------------------------------------
 
+def merge_colinear_clouds(clouda, cloudb, are_colinear, radius=3.0):
+    complements_clouda = copy.deepcopy(cloudb)
+    complements_cloudb = list()
+    any_in_range = False
+    none_perpendicular = True
+    for pointa in clouda:
+        is_complementary = list()
+        for pointb in cloudb:
+            if (math.hypot((pointa[0]-pointb[0]), (pointa[1]-pointb[1])) <= radius):
+                any_in_range = True
+                if are_colinear(pointa, pointb):
+                    is_complementary.append(True)
+                else:
+                    none_perpendicular = False
+                    is_complementary.append(False)
+                    try:
+                        complements_clouda.remove(pointb)
+                    except ValueError:
+                        pass 
+        if any(is_complementary) and all(is_complementary):
+            complements_cloudb.append(pointa)
+    if (any_in_range and none_perpendicular):
+        return True
+    elif (not any_in_range):
+        return False
+    else:
+        clouda.extend(complements_clouda)
+        cloudb.extend(complements_cloudb)
+
+
 def is_within_radius(clouda, cloudb, radius=6):
     for pointa in clouda:
         for pointb in cloudb:
@@ -51,14 +82,6 @@ def is_adjacent(clouda, cloudb):
                 return True
     return False
 
-'''
-class Point:
-
-    def __init__(self, x, y, b):
-        self.x = x #x coordinate in backprojection
-        self.y = y #y coordinate in backprojection
-        self.b = b #integrated bacprojection power
-'''
 class Cloud:
     #See https://docs.python.org/2/tutorial/datastructures.html for List-like Sytax and Usage
     def make_mask(self):
@@ -76,19 +99,6 @@ class Cloud:
         hdr['LITPIX'] = (np.count_nonzero(self.mask), 'Number of nonzero pixels in the mask')
         return fits.ImageHDU(data=self.mask, header=hdr)
     
-
-
-    '''
-    def __init__(self, list_of_points):
-
-        self.Points = set(filter(lambda p: isinstance(p, Point), list_of_points))
-        self.min_x = min([point.x for point in self.Points])
-        self.min_y = min([point.y for point in self.Points])    
-        mask_shape = (1+max([point.x for point in self.Points])-self.min_x, 1+max([point.y for point in self.Points])-self.min_y)
-        self.mask = np.zeros(mask_shape, dtype=int)
-        for point in self.Points:
-            self.mask[point.x-self.min_x][point.y-self.min_y] = 1 
-    '''
     def __init__(self, list_of_points):
         #Expects a python list of two-integer tuples, corresponding the the x,y coordinate of the points original location in the backprojection 
 
@@ -160,16 +170,27 @@ def isolate_all(xyt_filename):
     assert SUFFIX not in xyt_filename
     print 'Accessing: '+xyt_filename+' '
     hdu_list = fits.open(xyt_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
-    #header = hdu_list[0].header
-    backproj = hdu_list[0].data
-    #wlen = header['WLEN']
+    header = hdu_list[0].header
+    wlen = header['WLEN']
     #ntheta = header['NTHETA']
-    #Hi = hdu_list[1].data['hi'] 
-    #Hj = hdu_list[1].data['hj'] 
-    #Hthets = hdu_list[1].data['hthets']
+    backproj = hdu_list[0].data
+    #backproj = hdu_list[0].data[wlen:min(header['NAXIS1'], 500), wlen:min(header['NAXIS2'], 500)]
+    
+    Hi = hdu_list[1].data['hi'] 
+    Hj = hdu_list[1].data['hj'] 
+    Hthets = hdu_list[1].data['hthets']
+    theta_rhts = np.zeros_like(backproj)
+    for x in range(len(Hi)):
+        theta_rhts[Hi[x], Hj[x]] = rht.theta_rht(Hthets[x], original=True)
+    del Hi
+    del Hj
+    del Hthets
+    def colinear_points(pta, ptb):
+        return 0.75 <= math.cos(theta_rhts[pta]-theta_rhts[ptb]) #FUDGED
+
 
     #Define Adjacency Function
-    can_join=is_adjacent #is_within_radius
+    can_join=merge_colinear_clouds #is_adjacent #is_within_radius
 
     #Set Assignment
     coords = np.nonzero(backproj) 
@@ -182,7 +203,7 @@ def isolate_all(xyt_filename):
         new_cloud = [raw_points.pop()] #List of two-integer tuples
         matches = list() #List of integers
         for i, old_cloud in enumerate(unprocessed):
-            if can_join(old_cloud, new_cloud):
+            if can_join(old_cloud, new_cloud, are_colinear=colinear_points):  #): #FUDGED
                 matches.append(i)
         while len(matches) > 0:
             new_cloud.extend(unprocessed.pop(matches.pop()))
@@ -198,28 +219,21 @@ def isolate_all(xyt_filename):
         print debug_data
 
     #Convert lists of two-integer tuples into ImageHDUs
-    '''
-    def make_a_Point((x,y)):
-        return Point(x, y, backproj[x][y])
-    
-    def make_a_Cloud(list_of_points):
-        return Cloud(map(make_a_Point, list_of_points))
-    
-    list_of_HDUs = map(Cloud.to_ImageHDU, map(make_a_Cloud, unprocessed))
-    '''
     list_of_Clouds = map(Cloud, unprocessed)
     list_of_HDUs = map(Cloud.to_ImageHDU, list_of_Clouds) #map(Cloud, unprocessed))
     #list_of_HDUs.sort(key=lambda hdu: hdu.header['AREA'], reverse=True)
 
     #Output HDUList to File
-    output_hdulist = fits.HDUList(list_of_HDUs)
-    output_hdulist.insert(0, fits.PrimaryHDU(data=backproj, header=fits.Header())) #header=header[6:-2])) #hdu_list[0].copy()) #TODO Introduces Errors in Reading FITS File 
     output_filename = string.join(string.rsplit(xyt_filename, '.', 1), SUFFIX)
-    output_hdulist.writeto(output_filename, output_verify='silentfix', clobber=True, checksum=True)
-    print 'Results successfully output to '+output_filename
-    #return output_filename
+    if DEBUG:
+        output_hdulist = fits.HDUList(list_of_HDUs)
+        output_hdulist.insert(0, fits.PrimaryHDU(data=backproj, header=fits.Header())) #header=header[6:-2])) #hdu_list[0].copy()) #TODO Introduces Errors in Reading FITS File 
+        output_hdulist.writeto(output_filename, output_verify='silentfix', clobber=True, checksum=True)
+    else:
+        shdu = fits.StreamingHDU(output_filename, header)
 
-    return
+    print 'Results successfully output to '+output_filename
+    return output_filename
 
     '''
     #Unfinished Methods.......................................................................
