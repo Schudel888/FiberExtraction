@@ -21,6 +21,7 @@ import string
 #import fnmatch
 import copy
 import itertools
+import operator
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -138,7 +139,7 @@ def show(filaments_filename):
 
 
 
-def isolate_all(xyt_filename):
+def isolate_all(xyt_filename, BINS=8):
 
     #Read in RHT Output from filename_xyt??.fits
     assert xyt_filename.endswith('.fits')
@@ -150,197 +151,91 @@ def isolate_all(xyt_filename):
     wlen = header['WLEN']
     ntheta = header['NTHETA']
     frac = header['FRAC']
-    backproj = hdu_list[0].data
+    naxis1, naxis2 = hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']
     
     Hi = hdu_list[1].data['hi'] 
     Hj = hdu_list[1].data['hj'] 
     Hthets = hdu_list[1].data['hthets']
-    theta_rhts = np.zeros_like(backproj)
-    C = np.zeros(len(Hi))
+    C = np.zeros_like(Hi)
     for x in range(len(Hi)):
-        theta_rhts[Hi[x], Hj[x]] = rht.theta_rht(Hthets[x], original=True)
-        C[x] = int((theta_rhts[Hi[x], Hj[x]]*ntheta)//np.pi)
+        C[x] = int((rht.theta_rht(Hthets[x], original=True)*BINS)//np.pi)
+    del Hthets
     
-    if DEBUG:
-        #plt.quiver(Hi, Hj, 4*U, 4*V, C, cmap=plt.get_cmap('hsv'))
-        #plt.scatter(Hi, Hj, s=S, c=C, cmap=plt.get_cmap('hsv'))
-
-        from mpl_toolkits.mplot3d import axes3d
-        fig = plt.figure()
-        ax = fig.gca(projection='3d')
-        l=10
-        ax.quiver(Hi[::l], Hj[::l], C[::l], np.cos(C[::l]), np.sin(C[::l]), np.zeros_like(C[::l]))
-
-        plt.show()
-        plt.clf()
-
-    def are_colinear(pta, ptb, threshold=0.2): #0.8):
-        #return (threshold <= math.cos(theta_rhts[pta]-theta_rhts[ptb])**2)
-        a = theta_rhts[pta]
-        b = theta_rhts[ptb]
-        return threshold >= 0.5*math.atan2((math.sin(2*a)*math.cos(2*b)-math.sin(2*b)*math.cos(2*a)), (math.cos(2*a)*math.cos(2*b)+math.sin(2*b)*math.sin(2*a)))
-    def are_nearby(pta, ptb, radius=2.0):
-        return (math.hypot((pta[0]-ptb[0]), (pta[1]-ptb[1])) < radius)
-    def all_nearby_are_colinear(clouda, cloudb):
-        any_in_range = False
-        for pointa in clouda:
-            for pointb in cloudb:
-                if are_nearby(pointa, pointb):
-                    any_in_range = True
-                    if pointa == pointb:
-                        continue
-                    elif not are_colinear(pointa, pointb):
-                        return False
-        return any_in_range
-
     #Set Assignment
-    coords = np.nonzero(backproj) 
-    raw_points = zip(coords[0],coords[1]) #List of two-integer tuples
-    del coords 
-    problem_size = len(raw_points)
-    rht.update_progress(0.0, message='Unioning '+str(problem_size)+' points:')
-    
     unprocessed = list()
-    while len(raw_points) > 0:
-        new_point = raw_points.pop()
-        matches = list()
-        new_clouds = list()
-        for i, old_cloud in enumerate(unprocessed):
-            for old_point in old_cloud:
-                if are_nearby(new_point, old_point) and are_colinear(new_point, old_point):
-                    old_cloud.append(new_point) 
-                    matches.append(i)
-                    break 
-        N = len(matches)
-        if N == 0:
-            new_clouds.append([new_point])
-        elif N == 1:
-            #unprocessed[matches[0]].append(new_point)
-            pass
-        else:
-            temp_clouds = list()
-            while len(matches) > 0:
-                temp_clouds.append(unprocessed.pop(matches.pop()))
-            del matches
+    plt.ion()
+    for bin in range(BINS):
+        delimiter = np.nonzero(C == bin)[0]
+        raw_points = map(list, zip(Hi[delimiter],Hj[delimiter],np.zeros_like(delimiter)))
+        raw_map = np.negative(np.ones((naxis1, naxis2), dtype=np.int64))
+        problem_size = len(raw_points)
+        message='Step '+str(bin+1)+'/'+str(BINS)+': (N='+str(problem_size)+')'
 
-            def f(temp):
-                X = len(temp)
-                if X > 2:
-                    if all([all_nearby_are_colinear(*combo) for combo in itertools.combinations(temp, 2)]):
-                        '''
-                        new_cloud = [temp.pop()]
-                        while len(temp) > 0:
-                            new_cloud.extend(temp.pop())
-                            new_cloud.remove(new_point)
-                        new_clouds.append(new_cloud)
-                        '''
-                        new_cloud = set()
-                        while len(temp) > 0:
-                            new_cloud.update(temp.pop())
-                        new_clouds.append(list(new_cloud))
-                    else:
-                        map(f, map(list, itertools.combinations(temp, X-1)))
-                elif X==2:
-                    a = temp.pop()
-                    b = temp.pop()
-                    if all_nearby_are_colinear(a,b):
-                        a.extend(b)
-                        a.remove(new_point)
-                        new_clouds.append(a)
-                    else:
-                        if a not in new_clouds:
-                            new_clouds.append(a)
-                        if b not in new_clouds:
-                            new_clouds.append(a)
+        for i, point in enumerate(raw_points):
+            point[2] = i
+            raw_map[point[0]][point[1]] = i
 
-            f(temp_clouds)
+        for x in range(naxis1):
+            rht.update_progress((x/naxis1), message=message)
+            for y in range(naxis2):
+                try:
+                    raw_points[raw_map[x][y]][2] = raw_points[raw_map[x][y-1]][2]
+                    continue
+                except Exception:
+                    pass
+                try:
+                    raw_points[raw_map[x][y]][2] = raw_points[raw_map[x-1][y-1]][2]
+                    continue
+                except Exception:
+                    pass
+                try:
+                    raw_points[raw_map[x][y]][2] = raw_points[raw_map[x-1][y]][2]
+                    continue
+                except Exception:
+                    pass
+                try:
+                    raw_points[raw_map[x][y]][2] = raw_points[raw_map[x-1][y+1]][2]
+                    continue
+                except Exception:
+                    pass
+
+        raw_points.sort(key=operator.itemgetter(2))
+        representative = raw_points.pop()
+        new_cloud = list()
+        while len(raw_points)>0:
+            next = raw_points.pop()
+            if next[2] == representative[2]:
+                new_cloud.append((next[0], next[1]))
+            else:
+                if len(new_cloud) >= 2: #int(frac*wlen):
+                    unprocessed.append(copy.deepcopy(new_cloud))
+                
+                representative = next
+                new_cloud = list()
+
+        rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
+        plt.imshow(np.ones_like(raw_map)+raw_map)
+        plt.draw()
+        #plt.show()
 
 
-        unprocessed.extend(new_clouds)
-        progress = math.pow(1.0-(len(raw_points)/problem_size), 2) #O(n**2)
-        if 0.0 < progress < 1.0:
-            rht.update_progress(progress=progress, message='Unioning '+str(len(raw_points))+' points:') 
-    
-    rht.update_progress(1.0, final_message='Finished unioning '+str(problem_size)+' points into '+str(len(unprocessed))+' sets! Time Elapsed:')
     unprocessed.sort(key=len, reverse=True)
     if DEBUG:
         print map(len, unprocessed)
-        
 
     #Convert lists of two-integer tuples into ImageHDUs
     list_of_Clouds = map(Cloud, unprocessed)
     list_of_HDUs = map(Cloud.to_ImageHDU, list_of_Clouds) #map(Cloud, unprocessed))
     #list_of_HDUs.sort(key=lambda hdu: hdu.header['AREA'], reverse=True)
-    '''
-    if DEBUG:
-        fig = plt.figure()
-        main_axes = fig.add_axes([0.05, 0.05, 0.675, 0.90])
-        main_axes.quiver(Hi, Hj, U, V, C, cmap=plt.get_cmap('hsv'))
-
-        def hdu_show(hdu):
-            inset = fig.add_axes([0.775, 0.05, 0.175, 0.90])
-            xs, ys = np.nonzero(hdu.data) 
-            pts = theta_rhts[xs, ys]
-            inset.quiver(xs, ys, np.cos(pts), np.sin(pts), C[xs, ys], cmap=plt.get_cmap('hsv'))
-            fig.draw()
-
-        NPlots = len(list_of_HDUs)
-        NPage = 1
-        npages = int(math.ceil(NPlots/NPage)) 
-        for page in range(npages):
-            #plt.title('Filaments in: '+filaments_filename)
-            for figure in range(NPage*page, min(NPage*(page+1), NPlots)):
-                plt.subplot(int(math.sqrt(NPage)),int(math.sqrt(NPage)), (figure%NPage)+1)
-                hdu_show(list_of_HDUs[figure])
-                plt.show()
-                plt.cla()
-                '''
 
     #Output HDUList to File
     output_filename = string.join(string.rsplit(xyt_filename, '.', 1), SUFFIX)
     output_hdulist = fits.HDUList(list_of_HDUs)
-    output_hdulist.insert(0, fits.PrimaryHDU(data=backproj, header=fits.Header())) #header=header[6:-2])) #hdu_list[0].copy()) #TODO Introduces Errors in Reading FITS File 
+    output_hdulist.insert(0, hdu_list[0].copy()) #fits.PrimaryHDU(data=backproj, header=fits.Header())) #header=header[6:-2])) #TODO Introduces Errors in Reading FITS File 
     output_hdulist.writeto(output_filename, output_verify='silentfix', clobber=True, checksum=True)
 
     print 'Results successfully output to '+output_filename
     return output_filename
-
-    '''
-    #Unfinished Methods.......................................................................
-    def xyt(point):
-        (x,y) = point
-        #This would go a lot faster if the RHT sorted output by x coordinate
-        for i in range(ntheta):
-            if (Hi[i] == x) and (Hj[i] == y):
-                return Hthets[i]
-        return np.zeros(ntheta)
-
-    SIGMA = int(ntheta/16.0) #TODO What fraction of pi should be covered in 1StandardDeviation?
-    xyt_double_helix = rht.all_thetas(wlen, np.linspace(0.0, np.pi, ntheta), True)
-    filtered_xyt_double_helix = filta.gaussian_filter1d(xyt_double_helix, SIGMA, axis=2, mode='wrap')
-    def weights(displacement):
-        try:
-            arr = filtered_xyt_double_helix[displacement[0]+wlen//2][displacement[1]+wlen//2]
-        except Exception:
-            arr = np.zeros(ntheta)
-            temp_theta = math.atan2(math.abs(displacement[1]), displacement[0])
-            temp_index = int(math.floor((ntheta-1)*temp_theta/math.pi))
-            arr[temp_index] = 1 #math.sqrt(ntheta/math.pi) #TODO Normalization???
-            filta.gaussian_filter1d(arr, SIGMA, mode='wrap', output=arr)
-        finally:
-            temp_sum = np.sum(np.multiply(arr,arr))/2.0
-            return np.divide(arr, temp_sum) #TODO Scaling Area to 1?
-
-    def synergy_between(pointa, pointb):
-        if pointa is pointb:
-            return 0.0
-        displacement = (pointa[0]-pointb[0], pointa[1]-pointb[1])
-        r2 = (displacement[0]**2 + displacement[1]**2)/(wlen**2)
-        athets = 
-
-
-    print 'Beginning Fiber Refinement...'
-    '''
 
         
 #-----------------------------------------------------------------------------------------
