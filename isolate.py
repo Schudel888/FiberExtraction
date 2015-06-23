@@ -38,54 +38,6 @@ DEBUG = True
 # Initialization: Object Definitions
 #-----------------------------------------------------------------------------------------
 
-def merge_colinear_clouds(clouda, cloudb, are_colinear, radius=3.0):
-    complements_clouda = copy.deepcopy(cloudb)
-    complements_cloudb = list()
-    any_in_range = False
-    none_perpendicular = True
-    for pointa in clouda:
-        is_complementary = list()
-        for pointb in cloudb:
-            if (math.hypot((pointa[0]-pointb[0]), (pointa[1]-pointb[1])) <= radius):
-                any_in_range = True
-                if pointa != pointb and are_colinear(pointa, pointb):
-                    is_complementary.append(True)
-                else:
-                    none_perpendicular = False
-                    is_complementary.append(False)
-                    try:
-                        complements_clouda.remove(pointb)
-                    except ValueError:
-                        pass 
-        if any(is_complementary) and all(is_complementary):
-            complements_cloudb.append(pointa)
-    
-    if (any_in_range and none_perpendicular):
-        return True, 
-    elif (not any_in_range):
-        return False
-    else:
-        clouda.extend(complements_clouda)
-        cloudb.extend(complements_cloudb)
-        return False
-    
-
-
-def is_within_radius(clouda, cloudb, radius=6):
-    for pointa in clouda:
-        for pointb in cloudb:
-            if (math.hypot((pointa[0]-pointb[0]), (pointa[1]-pointb[1])) <= radius):
-                return True
-    return False
-
-
-def is_adjacent(clouda, cloudb):
-    for pointa in clouda:
-        for pointb in cloudb:
-            if (-1<=(pointa[0]-pointb[0])<=1 and -1<=(pointa[1]-pointb[1])<=1):
-                return True
-    return False
-
 class Cloud:
     #See https://docs.python.org/2/tutorial/datastructures.html for List-like Sytax and Usage
     def make_mask(self):
@@ -179,8 +131,8 @@ def show(filaments_filename):
         #plt.title('Filaments in: '+filaments_filename)
         for figure in range(4*page, min(4*(page+1), NPlots)):
             plt.subplot(2,2, (figure%4)+1)
-            #plt.spy(hdu_list[figure+1].data, origin='lower')
-            plt.contour(hdu_list[figure+1].data)
+            plt.spy(hdu_list[figure+1].data, origin='lower')
+            #plt.contour(hdu_list[figure+1].data)
         plt.show()
         plt.cla()
 
@@ -196,31 +148,39 @@ def isolate_all(xyt_filename):
     hdu_list = fits.open(xyt_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
     header = hdu_list[0].header
     wlen = header['WLEN']
-    #ntheta = header['NTHETA']
+    ntheta = header['NTHETA']
+    frac = header['FRAC']
     backproj = hdu_list[0].data
-    #backproj = hdu_list[0].data[wlen:min(header['NAXIS1'], 500), wlen:min(header['NAXIS2'], 500)]
     
     Hi = hdu_list[1].data['hi'] 
     Hj = hdu_list[1].data['hj'] 
     Hthets = hdu_list[1].data['hthets']
     theta_rhts = np.zeros_like(backproj)
-    U = np.zeros(len(Hi))
-    V = np.zeros(len(Hi))
     C = np.zeros(len(Hi))
     for x in range(len(Hi)):
-        theta_rhts[Hi[x], Hj[x]], U[x], V[x] = rht.theta_rht(Hthets[x], original=True, uv=True)
-        C[x] = theta_rhts[Hi[x], Hj[x]]
+        theta_rhts[Hi[x], Hj[x]] = rht.theta_rht(Hthets[x], original=True)
+        C[x] = int((theta_rhts[Hi[x], Hj[x]]*ntheta)//np.pi)
     
     if DEBUG:
-        plt.quiver(Hi, Hj, U, V, C, cmap=plt.get_cmap('hsv'))
-        plt.show()
-    else:
-        del Hthets, Hi, Hj, U, V, C
+        #plt.quiver(Hi, Hj, 4*U, 4*V, C, cmap=plt.get_cmap('hsv'))
+        #plt.scatter(Hi, Hj, s=S, c=C, cmap=plt.get_cmap('hsv'))
 
-    def are_colinear(pta, ptb, threshold=0.75):
-        return (threshold <= math.cos(theta_rhts[pta]-theta_rhts[ptb])**2)
-    def are_nearby(pta, ptb, radius=3.0):
-        return (math.hypot((pta[0]-ptb[0]), (pta[1]-ptb[1])) <= radius)
+        from mpl_toolkits.mplot3d import axes3d
+        fig = plt.figure()
+        ax = fig.gca(projection='3d')
+        l=10
+        ax.quiver(Hi[::l], Hj[::l], C[::l], np.cos(C[::l]), np.sin(C[::l]), np.zeros_like(C[::l]))
+
+        plt.show()
+        plt.clf()
+
+    def are_colinear(pta, ptb, threshold=0.2): #0.8):
+        #return (threshold <= math.cos(theta_rhts[pta]-theta_rhts[ptb])**2)
+        a = theta_rhts[pta]
+        b = theta_rhts[ptb]
+        return threshold >= 0.5*math.atan2((math.sin(2*a)*math.cos(2*b)-math.sin(2*b)*math.cos(2*a)), (math.cos(2*a)*math.cos(2*b)+math.sin(2*b)*math.sin(2*a)))
+    def are_nearby(pta, ptb, radius=2.0):
+        return (math.hypot((pta[0]-ptb[0]), (pta[1]-ptb[1])) < radius)
     def all_nearby_are_colinear(clouda, cloudb):
         any_in_range = False
         for pointa in clouda:
@@ -296,45 +256,6 @@ def isolate_all(xyt_filename):
             f(temp_clouds)
 
 
-
-        '''
-        new_cloud = [raw_points.pop()]
-        matches = list()
-        for i, old_cloud in enumerate(unprocessed):
-            match = list()
-            for old_point in old_cloud:
-                for new_point in new_cloud:
-                    if are_nearby(new_point, old_point) and are_colinear(new_point, old_point):
-                        match.append(True)
-                        new_cloud.append(old_point)
-                    else:
-                        match.append(False)
-            if all(match):
-                matches.append(i)
-
-        #List of two-integer tuples
-
-        matches = list()
-        for i, other_point in enumerate(raw_points):
-            if are_nearby(new_point, other_point) and are_colinear(new_point, other_point):
-                matches.append(i)
-
-        temp_points = list()
-        while len(matches) > 0:
-            temp_points.append(raw_points.pop(matches.pop()))
-
-        new_cloud = 
-
-        assert len(matches) == 0
-        for i, old_cloud in enumerate(unprocessed):
-            if all_nearby_are_colinear(new_cloud, old_cloud):
-                matches.append(i)
-        while len(matches) > 0:
-            new_cloud.extend(unprocessed.pop(matches.pop()))
-        unprocessed.append(new_cloud)
-        '''
-
-
         unprocessed.extend(new_clouds)
         progress = math.pow(1.0-(len(raw_points)/problem_size), 2) #O(n**2)
         if 0.0 < progress < 1.0:
@@ -350,15 +271,36 @@ def isolate_all(xyt_filename):
     list_of_Clouds = map(Cloud, unprocessed)
     list_of_HDUs = map(Cloud.to_ImageHDU, list_of_Clouds) #map(Cloud, unprocessed))
     #list_of_HDUs.sort(key=lambda hdu: hdu.header['AREA'], reverse=True)
+    '''
+    if DEBUG:
+        fig = plt.figure()
+        main_axes = fig.add_axes([0.05, 0.05, 0.675, 0.90])
+        main_axes.quiver(Hi, Hj, U, V, C, cmap=plt.get_cmap('hsv'))
+
+        def hdu_show(hdu):
+            inset = fig.add_axes([0.775, 0.05, 0.175, 0.90])
+            xs, ys = np.nonzero(hdu.data) 
+            pts = theta_rhts[xs, ys]
+            inset.quiver(xs, ys, np.cos(pts), np.sin(pts), C[xs, ys], cmap=plt.get_cmap('hsv'))
+            fig.draw()
+
+        NPlots = len(list_of_HDUs)
+        NPage = 1
+        npages = int(math.ceil(NPlots/NPage)) 
+        for page in range(npages):
+            #plt.title('Filaments in: '+filaments_filename)
+            for figure in range(NPage*page, min(NPage*(page+1), NPlots)):
+                plt.subplot(int(math.sqrt(NPage)),int(math.sqrt(NPage)), (figure%NPage)+1)
+                hdu_show(list_of_HDUs[figure])
+                plt.show()
+                plt.cla()
+                '''
 
     #Output HDUList to File
     output_filename = string.join(string.rsplit(xyt_filename, '.', 1), SUFFIX)
-    if DEBUG:
-        output_hdulist = fits.HDUList(list_of_HDUs)
-        output_hdulist.insert(0, fits.PrimaryHDU(data=backproj, header=fits.Header())) #header=header[6:-2])) #hdu_list[0].copy()) #TODO Introduces Errors in Reading FITS File 
-        output_hdulist.writeto(output_filename, output_verify='silentfix', clobber=True, checksum=True)
-    else:
-        shdu = fits.StreamingHDU(output_filename, header)
+    output_hdulist = fits.HDUList(list_of_HDUs)
+    output_hdulist.insert(0, fits.PrimaryHDU(data=backproj, header=fits.Header())) #header=header[6:-2])) #hdu_list[0].copy()) #TODO Introduces Errors in Reading FITS File 
+    output_hdulist.writeto(output_filename, output_verify='silentfix', clobber=True, checksum=True)
 
     print 'Results successfully output to '+output_filename
     return output_filename

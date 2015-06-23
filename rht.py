@@ -644,7 +644,7 @@ def theta_rht(theta_array, original, uv=False):
         rough_angle = 0.5*np.arctan2(np.sum(ys), np.sum(xs))
         
         # Clark, Peek, & Putman: Equation (8)
-        angle = np.pi-math.fmod(rough_angle+np.pi, np.pi)
+        angle = np.mod(rough_angle, np.pi) #np.pi-math.fmod(rough_angle+np.pi, np.pi)
         
     else:
         thetas = np.linspace(0.0, 2*np.pi, len(theta_array), endpoint=False, retstep=False)
@@ -658,7 +658,7 @@ def theta_rht(theta_array, original, uv=False):
     else:
         # Maps an array of theta power to an angle, and the components of one unit vector.
         # Designed for use with plt.quiver()
-        return angle, np.cos(angle), np.sin(angle)
+        return angle, np.cos(2*angle), np.sin(2*angle)
 
 
 def buffershape(ntheta, filesize=FILECAP):
