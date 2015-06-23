@@ -20,6 +20,7 @@ import string
 #import time 
 #import fnmatch
 import copy
+import itertools
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -47,7 +48,7 @@ def merge_colinear_clouds(clouda, cloudb, are_colinear, radius=3.0):
         for pointb in cloudb:
             if (math.hypot((pointa[0]-pointb[0]), (pointa[1]-pointb[1])) <= radius):
                 any_in_range = True
-                if are_colinear(pointa, pointb):
+                if pointa != pointb and are_colinear(pointa, pointb):
                     is_complementary.append(True)
                 else:
                     none_perpendicular = False
@@ -58,13 +59,16 @@ def merge_colinear_clouds(clouda, cloudb, are_colinear, radius=3.0):
                         pass 
         if any(is_complementary) and all(is_complementary):
             complements_cloudb.append(pointa)
+    
     if (any_in_range and none_perpendicular):
-        return True
+        return True, 
     elif (not any_in_range):
         return False
     else:
         clouda.extend(complements_clouda)
         cloudb.extend(complements_cloudb)
+        return False
+    
 
 
 def is_within_radius(clouda, cloudb, radius=6):
@@ -162,6 +166,26 @@ print ''
 # Bulk Fiber Isolation Functions
 #-----------------------------------------------------------------------------------------
 
+def show(filaments_filename):
+    assert filaments_filename.endswith('.fits')
+    assert '_xyt' in filaments_filename
+    assert SUFFIX in filaments_filename
+    print 'Accessing: '+filaments_filename+' '
+    hdu_list = filter(lambda h: int(h.header['LITPIX'])>5, fits.open(filaments_filename, mode='readonly', memmap=True, save_backup=False, checksum=True)[1:]) #Allows for reading in very large files!
+    
+    NPlots = len(hdu_list)-1
+    npages = int(math.ceil(NPlots/4)) 
+    for page in range(npages):
+        #plt.title('Filaments in: '+filaments_filename)
+        for figure in range(4*page, min(4*(page+1), NPlots)):
+            plt.subplot(2,2, (figure%4)+1)
+            #plt.spy(hdu_list[figure+1].data, origin='lower')
+            plt.contour(hdu_list[figure+1].data)
+        plt.show()
+        plt.cla()
+
+
+
 def isolate_all(xyt_filename):
 
     #Read in RHT Output from filename_xyt??.fits
@@ -180,17 +204,34 @@ def isolate_all(xyt_filename):
     Hj = hdu_list[1].data['hj'] 
     Hthets = hdu_list[1].data['hthets']
     theta_rhts = np.zeros_like(backproj)
+    U = np.zeros(len(Hi))
+    V = np.zeros(len(Hi))
+    C = np.zeros(len(Hi))
     for x in range(len(Hi)):
-        theta_rhts[Hi[x], Hj[x]] = rht.theta_rht(Hthets[x], original=True)
-    del Hi
-    del Hj
-    del Hthets
-    def colinear_points(pta, ptb):
-        return 0.75 <= math.cos(theta_rhts[pta]-theta_rhts[ptb]) #FUDGED
+        theta_rhts[Hi[x], Hj[x]], U[x], V[x] = rht.theta_rht(Hthets[x], original=True, uv=True)
+        C[x] = theta_rhts[Hi[x], Hj[x]]
+    
+    if DEBUG:
+        plt.quiver(Hi, Hj, U, V, C, cmap=plt.get_cmap('hsv'))
+        plt.show()
+    else:
+        del Hthets, Hi, Hj, U, V, C
 
-
-    #Define Adjacency Function
-    can_join=merge_colinear_clouds #is_adjacent #is_within_radius
+    def are_colinear(pta, ptb, threshold=0.75):
+        return (threshold <= math.cos(theta_rhts[pta]-theta_rhts[ptb])**2)
+    def are_nearby(pta, ptb, radius=3.0):
+        return (math.hypot((pta[0]-ptb[0]), (pta[1]-ptb[1])) <= radius)
+    def all_nearby_are_colinear(clouda, cloudb):
+        any_in_range = False
+        for pointa in clouda:
+            for pointb in cloudb:
+                if are_nearby(pointa, pointb):
+                    any_in_range = True
+                    if pointa == pointb:
+                        continue
+                    elif not are_colinear(pointa, pointb):
+                        return False
+        return any_in_range
 
     #Set Assignment
     coords = np.nonzero(backproj) 
@@ -198,25 +239,112 @@ def isolate_all(xyt_filename):
     del coords 
     problem_size = len(raw_points)
     rht.update_progress(0.0, message='Unioning '+str(problem_size)+' points:')
+    
     unprocessed = list()
     while len(raw_points) > 0:
-        new_cloud = [raw_points.pop()] #List of two-integer tuples
-        matches = list() #List of integers
+        new_point = raw_points.pop()
+        matches = list()
+        new_clouds = list()
         for i, old_cloud in enumerate(unprocessed):
-            if can_join(old_cloud, new_cloud, are_colinear=colinear_points):  #): #FUDGED
+            for old_point in old_cloud:
+                if are_nearby(new_point, old_point) and are_colinear(new_point, old_point):
+                    old_cloud.append(new_point) 
+                    matches.append(i)
+                    break 
+        N = len(matches)
+        if N == 0:
+            new_clouds.append([new_point])
+        elif N == 1:
+            #unprocessed[matches[0]].append(new_point)
+            pass
+        else:
+            temp_clouds = list()
+            while len(matches) > 0:
+                temp_clouds.append(unprocessed.pop(matches.pop()))
+            del matches
+
+            def f(temp):
+                X = len(temp)
+                if X > 2:
+                    if all([all_nearby_are_colinear(*combo) for combo in itertools.combinations(temp, 2)]):
+                        '''
+                        new_cloud = [temp.pop()]
+                        while len(temp) > 0:
+                            new_cloud.extend(temp.pop())
+                            new_cloud.remove(new_point)
+                        new_clouds.append(new_cloud)
+                        '''
+                        new_cloud = set()
+                        while len(temp) > 0:
+                            new_cloud.update(temp.pop())
+                        new_clouds.append(list(new_cloud))
+                    else:
+                        map(f, map(list, itertools.combinations(temp, X-1)))
+                elif X==2:
+                    a = temp.pop()
+                    b = temp.pop()
+                    if all_nearby_are_colinear(a,b):
+                        a.extend(b)
+                        a.remove(new_point)
+                        new_clouds.append(a)
+                    else:
+                        if a not in new_clouds:
+                            new_clouds.append(a)
+                        if b not in new_clouds:
+                            new_clouds.append(a)
+
+            f(temp_clouds)
+
+
+
+        '''
+        new_cloud = [raw_points.pop()]
+        matches = list()
+        for i, old_cloud in enumerate(unprocessed):
+            match = list()
+            for old_point in old_cloud:
+                for new_point in new_cloud:
+                    if are_nearby(new_point, old_point) and are_colinear(new_point, old_point):
+                        match.append(True)
+                        new_cloud.append(old_point)
+                    else:
+                        match.append(False)
+            if all(match):
+                matches.append(i)
+
+        #List of two-integer tuples
+
+        matches = list()
+        for i, other_point in enumerate(raw_points):
+            if are_nearby(new_point, other_point) and are_colinear(new_point, other_point):
+                matches.append(i)
+
+        temp_points = list()
+        while len(matches) > 0:
+            temp_points.append(raw_points.pop(matches.pop()))
+
+        new_cloud = 
+
+        assert len(matches) == 0
+        for i, old_cloud in enumerate(unprocessed):
+            if all_nearby_are_colinear(new_cloud, old_cloud):
                 matches.append(i)
         while len(matches) > 0:
             new_cloud.extend(unprocessed.pop(matches.pop()))
-        unprocessed.append(new_cloud) 
+        unprocessed.append(new_cloud)
+        '''
+
+
+        unprocessed.extend(new_clouds)
         progress = math.pow(1.0-(len(raw_points)/problem_size), 2) #O(n**2)
         if 0.0 < progress < 1.0:
             rht.update_progress(progress=progress, message='Unioning '+str(len(raw_points))+' points:') 
-    unprocessed.sort(key=len, reverse=True)
-    rht.update_progress(1.0, final_message='Finished unioning '+str(problem_size)+' points into '+str(len(unprocessed))+' sets! Time Elapsed:')
     
+    rht.update_progress(1.0, final_message='Finished unioning '+str(problem_size)+' points into '+str(len(unprocessed))+' sets! Time Elapsed:')
+    unprocessed.sort(key=len, reverse=True)
     if DEBUG:
-        debug_data=map(len, unprocessed)
-        print debug_data
+        print map(len, unprocessed)
+        
 
     #Convert lists of two-integer tuples into ImageHDUs
     list_of_Clouds = map(Cloud, unprocessed)
@@ -288,7 +416,7 @@ if __name__ == "__main__":
 
     #Do Processing
     for xyt_filename in args.files: # loop over input files
-        isolate_all(xyt_filename)
+        show(isolate_all(xyt_filename))
 
     #Cleanup and Exit
     exit()
