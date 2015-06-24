@@ -175,49 +175,47 @@ def isolate_all(xyt_filename, BINS=8):
             point[2] = i
             raw_map[point[0]][point[1]] = i
 
-        for x in range(naxis1):
-            rht.update_progress((x/naxis1), message=message)
-            for y in range(naxis2):
+        extent = [(-1,-1), (-1, 0), (-1, 1), (0, -1)] #[(-1,-1), (-1, 0), (-1, 1), (0, -1), (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2), (-1, -2), (-1, 2), (0,-2)] #
+        #O(N)
+        raw_points.sort(key=operator.itemgetter(0,1))
+        for i, coord in enumerate(raw_points):
+            rht.update_progress((i/problem_size), message=message)
+            for relative_coord in extent:
                 try:
-                    raw_points[raw_map[x][y]][2] = raw_points[raw_map[x][y-1]][2]
-                    continue
+                    coord[2] = raw_points[raw_map[coord[0]+relative_coord[0]][coord[1]+relative_coord[1]]][2]
+                    break
                 except Exception:
-                    pass
-                try:
-                    raw_points[raw_map[x][y]][2] = raw_points[raw_map[x-1][y-1]][2]
                     continue
-                except Exception:
-                    pass
-                try:
-                    raw_points[raw_map[x][y]][2] = raw_points[raw_map[x-1][y]][2]
-                    continue
-                except Exception:
-                    pass
-                try:
-                    raw_points[raw_map[x][y]][2] = raw_points[raw_map[x-1][y+1]][2]
-                    continue
-                except Exception:
-                    pass
+
+        finished_map = np.zeros_like(raw_map)
+        cloud = 1
 
         raw_points.sort(key=operator.itemgetter(2))
-        representative = raw_points.pop()
+        representative = tuple(raw_points.pop())
         new_cloud = list()
         while len(raw_points)>0:
             next = raw_points.pop()
             if next[2] == representative[2]:
                 new_cloud.append((next[0], next[1]))
             else:
-                if len(new_cloud) >= 2: #int(frac*wlen):
+                new_cloud.append((representative[0], representative[1]))
+                if len(new_cloud) >= 10: #int(frac*wlen):
+                    for out_point in new_cloud:
+                        finished_map[out_point] = cloud
+                    cloud += 1
                     unprocessed.append(copy.deepcopy(new_cloud))
+                else:
+                    for out_point in new_cloud:
+                        C[delimiter[raw_map[out_point]]] += 1
                 
                 representative = next
+                del new_cloud
                 new_cloud = list()
 
         rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
-        plt.imshow(np.ones_like(raw_map)+raw_map)
+        plt.imshow(finished_map.astype(np.float64)/cloud)
         plt.draw()
-        #plt.show()
-
+    plt.ioff()
 
     unprocessed.sort(key=len, reverse=True)
     if DEBUG:
