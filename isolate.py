@@ -139,7 +139,7 @@ def show(filaments_filename):
 
 
 
-def isolate_all(xyt_filename, BINS=6):
+def isolate_all(xyt_filename, BINS=8):
 
     #Read in RHT Output from filename_xyt??.fits
     assert xyt_filename.endswith('.fits')
@@ -159,44 +159,99 @@ def isolate_all(xyt_filename, BINS=6):
     C = np.zeros_like(Hi)
     for x in range(len(Hi)):
         C[x] = int((rht.theta_rht(Hthets[x], original=True)*BINS)//np.pi)
-    #plt.plot(np.bincount(C))
-    #plt.show()
+    plt.plot(np.bincount(C))
+    plt.show()
 
     del Hthets
-    
+    def rel_add(*tuples):
+        return tuple(map(sum, zip(*tuples)))
+
     #Set Assignment
     unprocessed = list()
     #plt.ion()
     for bin in range(BINS):
         delimiter = np.nonzero(C == bin)[0]
-        raw_points = map(list, zip(Hi[delimiter],Hj[delimiter],np.zeros_like(delimiter)))
-        raw_map = np.negative(np.ones((naxis1, naxis2), dtype=np.int64))
+        raw_points = zip(Hi[delimiter],Hj[delimiter]) #map(list, zip(Hi[delimiter],Hj[delimiter],np.zeros_like(delimiter)))
+        #raw_map = np.negative(np.ones((naxis1, naxis2), dtype=np.int64))
         problem_size = len(raw_points)
         message='Step '+str(bin+1)+'/'+str(BINS)+': (N='+str(problem_size)+')'
 
+        '''
+        point_dict = dict() 
         for i, point in enumerate(raw_points):
-            point[2] = i
-            raw_map[point[0]][point[1]] = i
+            #point[2] = i
+            #raw_map[point[0]][point[1]] = i
+            point_dict[point] = i 
+            raw_map[point] = i
+        '''
+        point_dict = dict([x[::-1] for x in enumerate(raw_points)])
 
-        extent = [(-1,-1), (-1, 0), (-1, 1), (0, -1), (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2), (-1, -2), (-1, 2), (0,-2)] #[(-1,-1), (-1, 0), (-1, 1), (0, -1)] #
+        extent = [(-1, 1), (-1,-1), (-1, 0), (0, -1), (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2), (-1, -2), (-1, 2), (0,-2)] #[(-1,-1), (-1, 0), (-1, 1), (0, -1)] #
         #O(N)
         raw_points.sort(key=operator.itemgetter(0,1))
         for i, coord in enumerate(raw_points):
             rht.update_progress((i/problem_size), message=message)
-            for relative_coord in extent:
+            for rel_coord in extent:
                 try:
-                    coord[2] = raw_points[raw_map[coord[0]+relative_coord[0]][coord[1]+relative_coord[1]]][2]
+                    #coord[2] = raw_points[raw_map[coord[0]+rel_coord[0]][coord[1]+rel_coord[1]]][2]
+                    point_dict[coord] = point_dict[rel_add(coord, rel_coord)]
                     break
                 except Exception:
                     continue
 
-        finished_map = np.zeros_like(raw_map)
+        finished_map = np.negative(np.ones((naxis1, naxis2), dtype=np.int64)) #np.zeros_like(raw_map)
+        for pt in raw_points:
+            finished_map[pt] = point_dict[pt]
+
+        histogram = np.bincount(map(point_dict.get, raw_points))
+        
+        plt.plot(histogram)
+        plt.show()
+        
+        mask = histogram >= int(frac*wlen)
+
+        for set_id in np.nonzero(mask)[0]:
+            
+            out_cloud = list()
+
+            other_dict = dict()
+            
+            while len(point_dict) > 0:
+                temp = point_dict.popitem()
+                if set_id == temp[1]:
+                    out_cloud.append(temp[0])
+                else:
+                    other_dict[temp[0]]=temp[1]
+    
+            point_dict = other_dict #TODO??
+            unprocessed.append(out_cloud)
+
+        '''
         cloud = 1
 
-        raw_points.sort(key=operator.itemgetter(2), reverse=True)
-        representative = tuple(raw_points.pop())
+
+        raw_points.sort(key=point_dict.get) #operator.itemgetter(2))
+        #print zip(raw_points, map(point_dict.get, raw_points))
+        representative = raw_points.pop() #tuple(raw_points.pop())
         new_cloud = list()
         while len(raw_points)>0:
+            next = raw_points.pop()
+            if point_dict[next] == point_dict[representative]:
+                new_cloud.append(next)
+            else:
+                new_cloud.append(representative)
+                if len(new_cloud) >= int(frac*wlen):
+                    out_cloud = list()
+                    while len(new_cloud) > 0:
+                        out_point = new_cloud.pop()
+                        finished_map[out_point] = cloud
+                        out_cloud.append(out_point)
+                    cloud += 1
+                    print cloud
+                    print out_cloud
+                    unprocessed.append(out_cloud)
+        ''
+            ''
             next = raw_points.pop()
             if next[2] == representative[2]:
                 new_cloud.append((next[0], next[1]))
@@ -210,19 +265,20 @@ def isolate_all(xyt_filename, BINS=6):
                         out_cloud.append(out_point)
                     cloud += 1
                     unprocessed.append(out_cloud)
-                '''
+                '
                 else:
                     for out_point in new_cloud:
                         C[delimiter[raw_map[out_point]]] += 1
-                '''
+                '
                 representative = next
                 #del new_cloud
                 #new_cloud = list()
                 #plt.imshow(finished_map)
                 #plt.draw()
+            '''
 
         rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
-        plt.imshow(finished_map) #.astype(np.float64)/cloud)
+        plt.imshow(finished_map+1) #.astype(np.float64)/cloud)
         #plt.draw()
         plt.show()
     plt.ioff()
