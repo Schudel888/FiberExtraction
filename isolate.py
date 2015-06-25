@@ -139,7 +139,7 @@ def show(filaments_filename):
 
 
 
-def isolate_all(xyt_filename, BINS=8):
+def isolate_all(xyt_filename, BINS=6):
 
     #Read in RHT Output from filename_xyt??.fits
     assert xyt_filename.endswith('.fits')
@@ -159,11 +159,14 @@ def isolate_all(xyt_filename, BINS=8):
     C = np.zeros_like(Hi)
     for x in range(len(Hi)):
         C[x] = int((rht.theta_rht(Hthets[x], original=True)*BINS)//np.pi)
+    #plt.plot(np.bincount(C))
+    #plt.show()
+
     del Hthets
     
     #Set Assignment
     unprocessed = list()
-    plt.ion()
+    #plt.ion()
     for bin in range(BINS):
         delimiter = np.nonzero(C == bin)[0]
         raw_points = map(list, zip(Hi[delimiter],Hj[delimiter],np.zeros_like(delimiter)))
@@ -175,7 +178,7 @@ def isolate_all(xyt_filename, BINS=8):
             point[2] = i
             raw_map[point[0]][point[1]] = i
 
-        extent = [(-1,-1), (-1, 0), (-1, 1), (0, -1)] #[(-1,-1), (-1, 0), (-1, 1), (0, -1), (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2), (-1, -2), (-1, 2), (0,-2)] #
+        extent = [(-1,-1), (-1, 0), (-1, 1), (0, -1), (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2), (-1, -2), (-1, 2), (0,-2)] #[(-1,-1), (-1, 0), (-1, 1), (0, -1)] #
         #O(N)
         raw_points.sort(key=operator.itemgetter(0,1))
         for i, coord in enumerate(raw_points):
@@ -190,7 +193,7 @@ def isolate_all(xyt_filename, BINS=8):
         finished_map = np.zeros_like(raw_map)
         cloud = 1
 
-        raw_points.sort(key=operator.itemgetter(2))
+        raw_points.sort(key=operator.itemgetter(2), reverse=True)
         representative = tuple(raw_points.pop())
         new_cloud = list()
         while len(raw_points)>0:
@@ -199,22 +202,29 @@ def isolate_all(xyt_filename, BINS=8):
                 new_cloud.append((next[0], next[1]))
             else:
                 new_cloud.append((representative[0], representative[1]))
-                if len(new_cloud) >= 10: #int(frac*wlen):
-                    for out_point in new_cloud:
+                if len(new_cloud) >= int(frac*wlen):
+                    out_cloud = list()
+                    while len(new_cloud) > 0:
+                        out_point = new_cloud.pop()
                         finished_map[out_point] = cloud
+                        out_cloud.append(out_point)
                     cloud += 1
-                    unprocessed.append(copy.deepcopy(new_cloud))
+                    unprocessed.append(out_cloud)
+                '''
                 else:
                     for out_point in new_cloud:
                         C[delimiter[raw_map[out_point]]] += 1
-                
+                '''
                 representative = next
-                del new_cloud
-                new_cloud = list()
+                #del new_cloud
+                #new_cloud = list()
+                #plt.imshow(finished_map)
+                #plt.draw()
 
         rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
-        plt.imshow(finished_map.astype(np.float64)/cloud)
-        plt.draw()
+        plt.imshow(finished_map) #.astype(np.float64)/cloud)
+        #plt.draw()
+        plt.show()
     plt.ioff()
 
     unprocessed.sort(key=len, reverse=True)
