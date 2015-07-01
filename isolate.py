@@ -12,16 +12,14 @@ from argparse import ArgumentDefaultsHelpFormatter
 
 import scipy.ndimage.filters as filta
 import math
-#import os
 import sys
 import string
-#import tempfile 
-#import shutil
-#import time 
-#import fnmatch
 import copy
 import itertools
 import operator
+
+import matplotlib
+matplotlib.rcParams['image.origin'] = 'lower'
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,14 +31,11 @@ import rht
 
 SUFFIX = '_filaments.'
 
-DEBUG = True
-
 #-----------------------------------------------------------------------------------------
 # Initialization: Object Definitions
 #-----------------------------------------------------------------------------------------
 
 class Cloud:
-    #See https://docs.python.org/2/tutorial/datastructures.html for List-like Sytax and Usage
     def make_mask(self):
         mask_shape = (1+max([point[0] for point in self.points])-self.min_x, 1+max([point[1] for point in self.points])-self.min_y)
         self.mask = np.zeros(mask_shape, dtype=int)
@@ -50,7 +45,9 @@ class Cloud:
     def to_ImageHDU(self):
         hdr = fits.Header()
         hdr['MIN_X'] = (self.min_x, 'Lower-left x-coordinate of mask in backprojection')
+        hdr['MAX_X'] = (self.max_x, 'Upper-right x-coordinate of mask in backprojection')
         hdr['MIN_Y'] = (self.min_y, 'Lower-left y-coordinate of mask in backprojection')
+        hdr['MAX_Y'] = (self.max_y, 'Upper-right y-coordinate of mask in backprojection')
         self.make_mask()
         hdr['AREA'] = (self.mask.size, 'Area covered by this mask')
         hdr['LITPIX'] = (np.count_nonzero(self.mask), 'Number of nonzero pixels in the mask')
@@ -60,12 +57,18 @@ class Cloud:
         #Expects a python list of two-integer tuples, corresponding the the x,y coordinate of the points original location in the backprojection 
 
         if isinstance(list_of_points, tuple):
-            list_of_points = [list_of_points]
+            if len(list_of_points) > 2:
+                list_of_points = list(list_of_points)
+            elif len(list_of_points) == 2:
+                list_of_points = [list_of_points]
         if isinstance(list_of_points, set):
             list_of_points = list(list_of_points)
         if isinstance(list_of_points, Cloud):
-            list_of_points = list_of_points.points
-        
+            self = list_of_points
+            return 
+
+        self.points = list(set(list_of_points))
+
         def proper_formatting(given):
             if not isinstance(given, list):
                 raise TypeError('Cloud cannot be constructed from the given datatype: '+str(type(given)))
@@ -76,15 +79,22 @@ class Cloud:
                     raise TypeError('All points in a cloud must be coordinate tuples')
                 if len(point) != 2:
                     raise ValueError('Points must be tuples of length 2')
-                if not (isinstance(point[0], np.int64) and isinstance(point[1], np.int64)):
+                if int(point[0])!=point[0] or int(point[1])!=point[1]:
                     raise TypeError('Points must contain integer coordinates'+repr(point))
             return True
-        #assert proper_formatting(list_of_points)
+        assert proper_formatting(list_of_points)
 
-        self.points = list(set(list_of_points))
+        '''
         self.min_x = min([point[0] for point in self.points])
-        self.min_y = min([point[1] for point in self.points])    
-        #self.make_mask()
+        self.min_y = min([point[1] for point in self.points])
+        self.max_x = max([point[0] for point in self.points])
+        self.max_y = max([point[1] for point in self.points])
+        '''
+        self.points.sort(key=operator.itemgetter(0))    
+        self.min_x, self.max_x = self.points[0][0], self.points[-1][0]
+        self.points.sort(key=operator.itemgetter(1))    
+        self.min_y, self.max_y = self.points[0][1], self.points[-1][1]
+        
 
 #-----------------------------------------------------------------------------------------
 # Rough Code
@@ -124,6 +134,8 @@ def show(filaments_filename):
     assert '_xyt' in filaments_filename
     assert SUFFIX in filaments_filename
     print 'Accessing: '+filaments_filename+' '
+
+    '''
     hdu_list = filter(lambda h: int(h.header['LITPIX'])>5, fits.open(filaments_filename, mode='readonly', memmap=True, save_backup=False, checksum=True)[1:]) #Allows for reading in very large files!
 
     NPlots = len(hdu_list)-1
@@ -136,10 +148,41 @@ def show(filaments_filename):
             plt.contour(hdu_list[figure+1].data)
         plt.show()
         plt.cla()
+    '''
+    hdu_list = fits.open(filaments_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
+    display = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
+
+    plt.ion()
+    plt.imshow(display)
+    plt.draw()
+
+    for i, hdu in enumerate(hdu_list):
+        if i==0:
+            #First HDU is the Backprojection
+            continue
+
+        hdr = hdu.header
+        min_x, min_y, max_x, max_y = hdr['MIN_X'], hdr['MIN_Y'], hdr['MAX_X'], hdr['MAX_Y']
+        
+        mask = np.copy(np.nonzero(hdu.data))
+        
+        mask[0] += min_x 
+        mask[1] += min_y
+        for coord in zip(mask[0], mask[1]):
+            display[coord] = i  
+        
+
+        plt.imshow(display)
+        plt.draw()
+        
+
+    plt.ioff()
+    plt.imshow(display)
+    plt.show()
 
 
 
-def isolate_all(xyt_filename, BINS=8):
+def isolate_all(xyt_filename, BINS=6, DEBUG = False):
 
     #Read in RHT Output from filename_xyt??.fits
     assert xyt_filename.endswith('.fits')
@@ -163,10 +206,12 @@ def isolate_all(xyt_filename, BINS=8):
         C[x] = int((rht.theta_rht(Hthets[x], original=True)*BINS)//np.pi)
         D[x] = int((rht.theta_rht(Hthets[x], original=True)*resolve*BINS)//np.pi)
     del Hthets
-    plt.plot(np.bincount(C)/resolve)
-    DD = np.bincount(D)
-    plt.plot(np.linspace(0, BINS, len(DD)), DD)
-    plt.show()
+
+    if DEBUG:
+        plt.plot(np.bincount(C)/resolve)
+        DD = np.bincount(D)
+        plt.plot(np.linspace(0, BINS, len(DD)), DD)
+        plt.show()
     
 
     def rel_add(*tuples):
@@ -174,7 +219,8 @@ def isolate_all(xyt_filename, BINS=8):
 
     #Set Assignment
     unprocessed = list()
-    #plt.ion()
+    if not DEBUG:
+        plt.ion()
     for bin in range(BINS):
         delimiter = np.nonzero(C == bin)[0]
         raw_points = zip(Hi[delimiter],Hj[delimiter])
@@ -200,12 +246,14 @@ def isolate_all(xyt_filename, BINS=8):
 
         histogram = np.bincount(map(point_dict.get, raw_points))
         
-        plt.plot(histogram)
-        plt.show()
+        if DEBUG:
+            plt.plot(histogram)
+            plt.show()
         
-        mask = histogram >= int(frac*wlen)
+        mask = np.nonzero(histogram >= int(frac*wlen))[0]
 
-        for set_id in np.nonzero(mask)[0]:
+        first = True
+        for set_id in mask:
             
             #Algorithm 1:
             out_cloud = list()
@@ -216,9 +264,13 @@ def isolate_all(xyt_filename, BINS=8):
                 temp = point_dict.popitem()
                 if set_id == temp[1]:
                     out_cloud.append(temp[0])
+                elif first and (temp[1] not in mask):
+                    #del temp
+                    continue
                 else:
                     other_dict[temp[0]]=temp[1]
-    
+            
+            first = False
             point_dict = other_dict
 
             '''
@@ -229,9 +281,13 @@ def isolate_all(xyt_filename, BINS=8):
 
         rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
         plt.imshow(finished_map+1)
-        #plt.draw()
-        plt.show()
+        if not DEBUG:
+            plt.draw()
+        else:
+            plt.show()
+
     plt.ioff()
+    plt.close()
 
     unprocessed.sort(key=len, reverse=True)
     if DEBUG:
@@ -240,6 +296,8 @@ def isolate_all(xyt_filename, BINS=8):
     #Convert lists of two-integer tuples into ImageHDUs
     list_of_HDUs = map(Cloud.to_ImageHDU, map(Cloud, unprocessed))
     #list_of_HDUs.sort(key=lambda hdu: hdu.header['AREA'], reverse=True)
+
+    #backprojection_sets = fits.PrimaryHDU(data=backproj, header=fits.Header())
 
     #Output HDUList to File
     output_filename = string.join(string.rsplit(xyt_filename, '.', 1), SUFFIX)
@@ -269,7 +327,7 @@ if __name__ == "__main__":
         show(isolate_all(xyt_filename))
 
     #Cleanup and Exit
-    exit()
+    #exit()
 
 
 
