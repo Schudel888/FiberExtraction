@@ -17,9 +17,13 @@ import string
 import copy
 import itertools
 import operator
+import collections
+import networkx as nx
 
 import matplotlib
 matplotlib.rcParams['image.origin'] = 'lower'
+matplotlib.rcParams['figure.figsize'] = 8,8
+matplotlib.rcParams['figure.dpi'] = 150
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -162,7 +166,8 @@ def show(filaments_filename):
             continue
 
         hdr = hdu.header
-        min_x, min_y, max_x, max_y = hdr['MIN_X'], hdr['MIN_Y'], hdr['MAX_X'], hdr['MAX_Y']
+        min_x, min_y = hdr['MIN_X'], hdr['MIN_Y']
+        #max_x, max_y = hdr['MAX_X'], hdr['MAX_Y']
         
         mask = np.copy(np.nonzero(hdu.data))
         
@@ -171,17 +176,20 @@ def show(filaments_filename):
         for coord in zip(mask[0], mask[1]):
             display[coord] = i  
         
-
+        
+        plt.cla()
+        plt.clf()
         plt.imshow(display)
         plt.draw()
-        
-
+    
+    plt.cla()
+    plt.clf()
+    plt.close()
     plt.ioff()
+    
     plt.imshow(display)
     plt.show()
-
-
-
+    
 def isolate_all(xyt_filename, BINS=6, DEBUG = False):
 
     #Read in RHT Output from filename_xyt??.fits
@@ -194,13 +202,14 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = False):
     wlen = header['WLEN']
     ntheta = header['NTHETA']
     frac = header['FRAC']
-    naxis1, naxis2 = hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']
-    
+    naxis1 = hdu_list[0].header['NAXIS1']
+    naxis2 = hdu_list[0].header['NAXIS2']
+
     Hi = hdu_list[1].data['hi'] 
     Hj = hdu_list[1].data['hj'] 
     Hthets = hdu_list[1].data['hthets']
     C = np.zeros_like(Hi)
-    resolve = 10
+    resolve = 2
     D = np.zeros_like(C)
     for x in range(len(Hi)):
         C[x] = int((rht.theta_rht(Hthets[x], original=True)*BINS)//np.pi)
@@ -212,7 +221,8 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = False):
         DD = np.bincount(D)
         plt.plot(np.linspace(0, BINS, len(DD)), DD)
         plt.show()
-    
+    else:
+        del D 
 
     def rel_add(*tuples):
         return tuple(map(sum, zip(*tuples)))
@@ -228,18 +238,40 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = False):
         message='Step '+str(bin+1)+'/'+str(BINS)+': (N='+str(problem_size)+')'
 
         point_dict = dict([x[::-1] for x in enumerate(raw_points)])
+        set_dict = collections.defaultdict(list)
 
-        extent = [(-1, 1), (-1,-1), (-1, 0), (0, -1), (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2), (-1, -2), (-1, 2), (0,-2)] #[(-1,-1), (-1, 0), (-1, 1), (0, -1)] #
-        raw_points.sort(key=operator.itemgetter(0,1))
+        extent = [(-1,-1), (-1, 0), (-1, 1), (0, -1)] #[(-1, 1), (-1,-1), (-1, 0), (0, -1), (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2), (-1, -2), (-1, 2), (0,-2)] # #
+        ##raw_points.sort(key=operator.itemgetter(0,1)) DO NOT SORT RAW_POINTS
         for i, coord in enumerate(raw_points):
             rht.update_progress((i/problem_size), message=message)
             for rel_coord in extent:
+                try:
+                    j = point_dict[rel_add(coord, rel_coord)]
+                    set_dict[point_dict[coord]].append(j)
+                except Exception:
+                    continue
+                '''
                 try:
                     point_dict[coord] = point_dict[rel_add(coord, rel_coord)]
                     break
                 except Exception:
                     continue
+                '''
+        
+        G = nx.from_dict_of_lists(set_dict) #Undirected graph made using set_dict as an adjacency list 
+        
+        sources = range(problem_size)
+        while len(sources) > 0: 
+            source = sources.pop()
+            try:
+                for member in nx.descendants(G, source):
+                    sources.remove(member)
+                    point_dict[raw_points[member]] = source
+            except nx.NetworkXError:
+                #Assume we hit an isolated pixel and move on
+                pass
 
+        #************************************************************************************************
         finished_map = np.negative(np.ones((naxis1, naxis2), dtype=np.int64))
         for pt in raw_points:
             finished_map[pt] = point_dict[pt]
@@ -286,8 +318,10 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = False):
         else:
             plt.show()
 
-    plt.ioff()
+    plt.cla()
+    plt.clf()
     plt.close()
+    plt.ioff()
 
     unprocessed.sort(key=len, reverse=True)
     if DEBUG:
@@ -325,6 +359,7 @@ if __name__ == "__main__":
     #Do Processing
     for xyt_filename in args.files: # loop over input files
         show(isolate_all(xyt_filename))
+        #isolate_all(xyt_filename)
 
     #Cleanup and Exit
     #exit()
