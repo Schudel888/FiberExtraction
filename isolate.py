@@ -22,8 +22,8 @@ import networkx as nx
 
 import matplotlib
 matplotlib.rcParams['image.origin'] = 'lower'
-matplotlib.rcParams['figure.figsize'] = 8,8
-matplotlib.rcParams['figure.dpi'] = 150
+matplotlib.rcParams['figure.figsize'] = 6,6
+matplotlib.rcParams['figure.dpi'] = 80
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -176,21 +176,27 @@ def show(filaments_filename):
         for coord in zip(mask[0], mask[1]):
             display[coord] = i  
         
-        
         plt.cla()
         plt.clf()
         plt.imshow(display)
         plt.draw()
     
+    print 'cla'
     plt.cla()
+    print 'clf'
     plt.clf()
+    print 'close'
     plt.close()
+    print 'ioff'
     plt.ioff()
+    print 'imshow'
     
     plt.imshow(display)
+    print 'show'
     plt.show()
+    print 'done'
     
-def isolate_all(xyt_filename, BINS=6, DEBUG = False):
+def isolate_all(xyt_filename, BINS=6, DEBUG = True):
 
     #Read in RHT Output from filename_xyt??.fits
     assert xyt_filename.endswith('.fits')
@@ -277,11 +283,11 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = False):
             finished_map[pt] = point_dict[pt]
 
         histogram = np.bincount(map(point_dict.get, raw_points))
-        
+        '''
         if DEBUG:
             plt.plot(histogram)
             plt.show()
-        
+        '''
         mask = np.nonzero(histogram >= int(frac*wlen))[0]
 
         first = True
@@ -318,10 +324,11 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = False):
         else:
             plt.show()
 
-    plt.cla()
-    plt.clf()
-    plt.close()
-    plt.ioff()
+    if not DEBUG:
+        plt.cla()
+        plt.clf()
+        plt.close()
+        plt.ioff()
 
     unprocessed.sort(key=len, reverse=True)
     if DEBUG:
@@ -331,11 +338,11 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = False):
     list_of_HDUs = map(Cloud.to_ImageHDU, map(Cloud, unprocessed))
     #list_of_HDUs.sort(key=lambda hdu: hdu.header['AREA'], reverse=True)
 
-    #backprojection_sets = fits.PrimaryHDU(data=backproj, header=fits.Header())
 
     #Output HDUList to File
     output_filename = string.join(string.rsplit(xyt_filename, '.', 1), SUFFIX)
     output_hdulist = fits.HDUList(list_of_HDUs)
+
     output_hdulist.insert(0, hdu_list[0].copy()) #fits.PrimaryHDU(data=backproj, header=fits.Header())) #header=header[6:-2])) #TODO Introduces Errors in Reading FITS File 
     output_hdulist.writeto(output_filename, output_verify='silentfix', clobber=True, checksum=True)
 
