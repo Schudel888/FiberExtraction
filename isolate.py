@@ -41,7 +41,7 @@ SUFFIX = '_filaments.'
 
 class Cloud:
     def make_mask(self):
-        mask_shape = (1+max([point[0] for point in self.points])-self.min_x, 1+max([point[1] for point in self.points])-self.min_y)
+        mask_shape = (1+self.max_x-self.min_x, 1+self.max_y-self.min_y)
         self.mask = np.zeros(mask_shape, dtype=int)
         for point in self.points:
             self.mask[point[0]-self.min_x][point[1]-self.min_y] = 1 
@@ -54,7 +54,7 @@ class Cloud:
         hdr['MAX_Y'] = (self.max_y, 'Upper-right y-coordinate of mask in backprojection')
         self.make_mask()
         hdr['AREA'] = (self.mask.size, 'Area covered by this mask')
-        hdr['LITPIX'] = (np.count_nonzero(self.mask), 'Number of nonzero pixels in the mask')
+        hdr['LITPIX'] = (len(self.points), 'Number of nonzero pixels in the mask')
         return fits.ImageHDU(data=self.mask, header=hdr)
     
     def __init__(self, list_of_points):
@@ -204,42 +204,44 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
     assert SUFFIX not in xyt_filename
     print 'Accessing: '+xyt_filename+' '
     hdu_list = fits.open(xyt_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
-    header = hdu_list[0].header
-    wlen = header['WLEN']
-    ntheta = header['NTHETA']
-    frac = header['FRAC']
+    #ntheta = hdu_list[0].header['NTHETA']
+    wlen = hdu_list[0].header['WLEN']
+    frac = hdu_list[0].header['FRAC']
     naxis1 = hdu_list[0].header['NAXIS1']
     naxis2 = hdu_list[0].header['NAXIS2']
-
     Hi = hdu_list[1].data['hi'] 
     Hj = hdu_list[1].data['hj'] 
-    Hthets = hdu_list[1].data['hthets']
-    C = np.zeros_like(Hi)
-    resolve = 2
-    D = np.zeros_like(C)
-    for x in range(len(Hi)):
-        C[x] = int((rht.theta_rht(Hthets[x], original=True)*BINS)//np.pi)
-        D[x] = int((rht.theta_rht(Hthets[x], original=True)*resolve*BINS)//np.pi)
-    del Hthets
 
+    
+    #Compute TheteRHT for all pixels given, then bin by theta
+    C = np.zeros_like(Hi)
+    #resolve = 2
+    #D = np.zeros_like(C)
+    for x, thet in enumerate(hdu_list[1].data['hthets']):
+        C[x] = int((rht.theta_rht(thet, original=True)*BINS)//np.pi)
+        #D[x] = int((rht.theta_rht(thet, original=True)*resolve*BINS)//np.pi)
+    '''
     if DEBUG:
         plt.plot(np.bincount(C)/resolve)
         DD = np.bincount(D)
         plt.plot(np.linspace(0, BINS, len(DD)), DD)
+        del DD
         plt.show()
-    else:
-        del D 
+    del D 
+    '''
 
     def rel_add(*tuples):
         return tuple(map(sum, zip(*tuples)))
 
-    #Set Assignment
-    unprocessed = list()
     if not DEBUG:
         plt.ion()
+
+    #Set Assignment
+    unprocessed = list()    
     for bin in range(BINS):
         delimiter = np.nonzero(C == bin)[0]
         raw_points = zip(Hi[delimiter],Hj[delimiter])
+        del delimiter
         problem_size = len(raw_points)
         message='Step '+str(bin+1)+'/'+str(BINS)+': (N='+str(problem_size)+')'
 
@@ -247,40 +249,40 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         set_dict = collections.defaultdict(list)
 
         extent = [(-1,-1), (-1, 0), (-1, 1), (0, -1)] #[(-1, 1), (-1,-1), (-1, 0), (0, -1), (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2), (-1, -2), (-1, 2), (0,-2)] # #
-        ##raw_points.sort(key=operator.itemgetter(0,1)) DO NOT SORT RAW_POINTS
         for i, coord in enumerate(raw_points):
-            rht.update_progress((i/problem_size), message=message)
+            rht.update_progress(0.15*(i/problem_size), message=message)
             for rel_coord in extent:
                 try:
                     j = point_dict[rel_add(coord, rel_coord)]
                     set_dict[point_dict[coord]].append(j)
                 except Exception:
                     continue
-                '''
-                try:
-                    point_dict[coord] = point_dict[rel_add(coord, rel_coord)]
-                    break
-                except Exception:
-                    continue
-                '''
         
-        G = nx.from_dict_of_lists(set_dict) #Undirected graph made using set_dict as an adjacency list 
+        del extent 
+        G = nx.from_dict_of_lists(set_dict) #Undirected graph made using set_dict as an adjacency list
+        del set_dict 
         
         sources = range(problem_size)
+        flags = np.ones((problem_size), dtype=int)
         while len(sources) > 0: 
             source = sources.pop()
-            try:
-                for member in nx.descendants(G, source):
-                    sources.remove(member)
-                    point_dict[raw_points[member]] = source
-            except nx.NetworkXError:
-                #Assume we hit an isolated pixel and move on
-                pass
+            if not flags[source]:
+                continue
+            else:
+                rht.update_progress(0.15+0.15*(1.0-len(sources)/problem_size), message=message)
+                try:
+                    for member in nx.descendants(G, source):
+                        #sources.remove(member)
+                        flags[member] = False
+                        point_dict[raw_points[member]] = source
+                except nx.NetworkXError:
+                    #Assume we hit an isolated pixel and move on
+                    pass
 
         #************************************************************************************************
         finished_map = np.negative(np.ones((naxis1, naxis2), dtype=np.int64))
-        for pt in raw_points:
-            finished_map[pt] = point_dict[pt]
+        #for pt in raw_points:
+            #finished_map[pt] = point_dict[pt]
 
         histogram = np.bincount(map(point_dict.get, raw_points))
         '''
@@ -289,19 +291,20 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
             plt.show()
         '''
         mask = np.nonzero(histogram >= int(frac*wlen))[0]
+        del histogram
 
         first = True
         for set_id in mask:
+            rht.update_progress(0.3+0.7*(1.0-len(point_dict)/problem_size), message=message)
             
-            #Algorithm 1:
             out_cloud = list()
-
             other_dict = dict()
             
             while len(point_dict) > 0:
                 temp = point_dict.popitem()
                 if set_id == temp[1]:
                     out_cloud.append(temp[0])
+                    finished_map[temp[0]] = set_id
                 elif first and (temp[1] not in mask):
                     #del temp
                     continue
@@ -310,19 +313,19 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
             
             first = False
             point_dict = other_dict
-
-            '''
-            #Algorithm 2:
-            out_cloud = [point for (point, point_set) in point_dict.items() if point_set == set_id]
-            '''
             unprocessed.append(out_cloud)
 
         rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
-        plt.imshow(finished_map+1)
-        if not DEBUG:
-            plt.draw()
-        else:
-            plt.show()
+        try:
+            plt.imshow(finished_map+1)
+            if not DEBUG:
+                plt.cla()
+                plt.clf()
+                plt.draw()
+            else:
+                plt.show()
+        except Exception:
+            print 'Failed to Display Theta Slice'
 
     if not DEBUG:
         plt.cla()
@@ -335,15 +338,13 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         print map(len, unprocessed)
 
     #Convert lists of two-integer tuples into ImageHDUs
-    list_of_HDUs = map(Cloud.to_ImageHDU, map(Cloud, unprocessed))
-    #list_of_HDUs.sort(key=lambda hdu: hdu.header['AREA'], reverse=True)
-
+    output_hdulist = fits.HDUList(map(Cloud.to_ImageHDU, map(Cloud, unprocessed)))
+    del unprocessed
 
     #Output HDUList to File
     output_filename = string.join(string.rsplit(xyt_filename, '.', 1), SUFFIX)
-    output_hdulist = fits.HDUList(list_of_HDUs)
-
-    output_hdulist.insert(0, hdu_list[0].copy()) #fits.PrimaryHDU(data=backproj, header=fits.Header())) #header=header[6:-2])) #TODO Introduces Errors in Reading FITS File 
+    #output_hdulist.insert(0, fits.ImageHDU(data=backprojection_with_sets, header=fits.Header()))
+    output_hdulist.insert(0, hdu_list[0].copy()) #TODO Introduces Errors in Reading FITS File 
     output_hdulist.writeto(output_filename, output_verify='silentfix', clobber=True, checksum=True)
 
     print 'Results successfully output to '+output_filename
@@ -365,8 +366,8 @@ if __name__ == "__main__":
 
     #Do Processing
     for xyt_filename in args.files: # loop over input files
-        show(isolate_all(xyt_filename))
-        #isolate_all(xyt_filename)
+        #show(isolate_all(xyt_filename))
+        isolate_all(xyt_filename)
 
     #Cleanup and Exit
     #exit()
