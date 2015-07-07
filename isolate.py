@@ -10,7 +10,6 @@ from astropy.io import fits
 from argparse import ArgumentParser
 from argparse import ArgumentDefaultsHelpFormatter
 
-import scipy.ndimage.filters as filta
 import math
 import sys
 import string
@@ -20,10 +19,10 @@ import operator
 import collections
 import networkx as nx
 
-import matplotlib
-matplotlib.rcParams['image.origin'] = 'lower'
-matplotlib.rcParams['figure.figsize'] = 6,6
-matplotlib.rcParams['figure.dpi'] = 80
+#import matplotlib
+#matplotlib.rcParams['image.origin'] = 'lower'
+#matplotlib.rcParams['figure.figsize'] = 6,6
+#matplotlib.rcParams['figure.dpi'] = 80
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -86,7 +85,7 @@ class Cloud:
                 if int(point[0])!=point[0] or int(point[1])!=point[1]:
                     raise TypeError('Points must contain integer coordinates'+repr(point))
             return True
-        assert proper_formatting(list_of_points)
+        #assert proper_formatting(list_of_points)
 
         '''
         self.min_x = min([point[0] for point in self.points])
@@ -155,11 +154,11 @@ def show(filaments_filename):
     '''
     hdu_list = fits.open(filaments_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
     display = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
-
+    
     plt.ion()
     plt.imshow(display)
     plt.draw()
-
+    
     for i, hdu in enumerate(hdu_list):
         if i==0:
             #First HDU is the Backprojection
@@ -214,28 +213,17 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
 
     
     #Compute TheteRHT for all pixels given, then bin by theta
-    C = np.zeros_like(Hi)
-    #resolve = 2
-    #D = np.zeros_like(C)
-    for x, thet in enumerate(hdu_list[1].data['hthets']):
-        C[x] = int((rht.theta_rht(thet, original=True)*BINS)//np.pi)
-        #D[x] = int((rht.theta_rht(thet, original=True)*resolve*BINS)//np.pi)
-    '''
-    if DEBUG:
-        plt.plot(np.bincount(C)/resolve)
-        DD = np.bincount(D)
-        plt.plot(np.linspace(0, BINS, len(DD)), DD)
-        del DD
-        plt.show()
-    del D 
-    '''
+    def func(Hthet):
+        return int((rht.theta_rht(Hthet, original=True)*BINS)//np.pi)
+    C = np.asarray(map(func, hdu_list[1].data['hthets']))
+    del func
 
     def rel_add(*tuples):
         return tuple(map(sum, zip(*tuples)))
-
+    '''
     if not DEBUG:
         plt.ion()
-
+    '''
     #Set Assignment
     unprocessed = list()    
     for bin in range(BINS):
@@ -295,7 +283,10 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
 
         first = True
         for set_id in mask:
-            rht.update_progress(0.3+0.7*(1.0-len(point_dict)/problem_size), message=message)
+            prog = 0.3+0.7*(1.0-len(point_dict)/problem_size)
+            if 0.0 < prog < 1.0:
+                rht.update_progress(prog, message=message)
+                pass
             
             out_cloud = list()
             other_dict = dict()
@@ -316,8 +307,9 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
             unprocessed.append(out_cloud)
 
         rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
+        '''
         try:
-            plt.imshow(finished_map+1)
+            plt.imshow(finished_map)#+1)
             if not DEBUG:
                 plt.cla()
                 plt.clf()
@@ -326,13 +318,14 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
                 plt.show()
         except Exception:
             print 'Failed to Display Theta Slice'
-
+        '''
+    '''    
     if not DEBUG:
         plt.cla()
         plt.clf()
         plt.close()
         plt.ioff()
-
+    '''
     unprocessed.sort(key=len, reverse=True)
     if DEBUG:
         print map(len, unprocessed)
