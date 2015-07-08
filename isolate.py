@@ -48,6 +48,7 @@ class Cloud:
         self.make_mask()
         hdr['AREA'] = (self.mask.size, 'Area covered by this mask')
         hdr['LITPIX'] = (len(self.points), 'Number of nonzero pixels in the mask')
+        hdr['DIAG'] = (math.hypot(*self.mask.shape), 'Diagonal size of mask')
         return fits.ImageHDU(data=self.mask, header=hdr)
     
     def __init__(self, list_of_points):
@@ -125,8 +126,36 @@ print ''
 #-----------------------------------------------------------------------------------------
 # Bulk Fiber Isolation Functions
 #-----------------------------------------------------------------------------------------
+skip = 1 #Number of HDUs that do not correspond to filaments in output files
 
-def show(filaments_filename):
+def average_column_density(filaments_filename):
+    assert filaments_filename.endswith('.fits')
+    assert '_xyt' in filaments_filename
+    assert SUFFIX in filaments_filename
+    print 'Accessing: '+filaments_filename+' '
+
+    hdu_list = fits.open(filaments_filename, mode='update', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
+    correlation_data = np.asarray(fits.open('D:/LAB_corrected_coldens.fits', mode='readonly', memmap=False, save_backup=False, checksum=True)[0].data)
+    from matplotlib import pyplot as plt
+    plt.imshow(correlation_data)
+    plt.show()
+
+    coldens = 'COLDENS'
+
+    if coldens in hdu_list[skip].header:
+        print coldens+' keyword found in filament header...'
+        if raw_input('Exit or Overwrite? [exit]/o') != 'o':
+            return filaments_filename, coldens
+
+    for hdu in hdu_list[skip:]:
+        hdr = hdu.header
+        stuff = correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1]
+        print stuff
+        hdr[coldens] = np.average(stuff[np.nonzero(hdu.data.T)])
+    return filaments_filename, coldens
+
+
+def show(filaments_filename, key=None):
     import matplotlib
     #matplotlib.rcParams['backend'] = 'TkAgg'
     matplotlib.rcParams['image.origin'] = 'lower'
@@ -142,33 +171,18 @@ def show(filaments_filename):
     hdu_list = fits.open(filaments_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
     display = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
 
-    skip = 1
-    '''
-    if len(hdu_list) < 100:
-        plt.ion()
-        plt.imshow(display.T)
-        plt.draw()
-        
+    if key is None:
         for i, hdu in enumerate(hdu_list[skip:]):
-            hdr = hdu.header
+            hdr = hdu.header            
             display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = i
-            plt.cla()
-            plt.clf()
-            plt.imshow(display.T)
-            plt.draw()
-
-        plt.cla()
-        plt.clf()
-        plt.close()
-        plt.ioff()
-        plt.imshow(display.T*hdu_list[0].data)
-        plt.show()
-
+    elif isinstance(key, str):
+        for hdu in hdu_list[skip:]:
+            hdr = hdu.header            
+            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = hdr[key]
     else:
-    '''
-    for i, hdu in enumerate(hdu_list[skip:]):
-        hdr = hdu.header            
-        display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = i
+        print 'Unable to show data using the given key: '+str(key)
+        return
+
     plt.imshow(display.T)
     plt.show()
     
@@ -199,7 +213,8 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         plt.ion()
     '''
     #Set Assignment
-    unprocessed = list()    
+    #unprocessed = list()
+    list_of_HDUs = list() 
     search_pattern = [(-1,-1), (-1, 0), (-1, 1), (0, -1)] #[(-1, 1), (-1,-1), (-1, 0), (0, -1), (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2), (-1, -2), (-1, 2), (0,-2)]
     for bin in range(BINS):
         delimiter = np.nonzero(C == bin)[0]
@@ -212,7 +227,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         set_dict = collections.defaultdict(list)
 
         for i, coord in enumerate(raw_points):
-            rht.update_progress(0.15*(i/problem_size), message=message)
+            rht.update_progress(0.2*(i/problem_size), message=message)
             for rel_coord in search_pattern:
                 try:
                     j = point_dict[rel_add(coord, rel_coord)]
@@ -230,7 +245,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
             if not flags[source]:
                 continue
             else:
-                rht.update_progress(0.15+0.15*(1.0-len(sources)/problem_size), message=message)
+                rht.update_progress(0.2+0.2*(1.0-len(sources)/problem_size), message=message)
                 try:
                     for member in nx.descendants(G, source):
                         flags[member] = False
@@ -255,32 +270,6 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         mask = np.nonzero(histogram >= int(frac*wlen))[0]
         del histogram
 
-        '''
-        first = True
-        for set_id in mask:
-            prog = 0.3+0.7*(1.0-len(point_dict)/problem_size)
-            if 0.0 < prog < 1.0:
-                rht.update_progress(prog, message=message)
-                pass
-            
-            out_cloud = list()
-            other_dict = dict()
-            
-            while len(point_dict) > 0:
-                temp = point_dict.popitem()
-                if set_id == temp[1]:
-                    out_cloud.append(temp[0])
-                    #finished_map[temp[0]] = set_id
-                elif first and (temp[1] not in mask):
-                    #del temp
-                    continue
-                else:
-                    other_dict[temp[0]]=temp[1]
-            
-            first = False
-            point_dict = other_dict
-            unprocessed.append(out_cloud)
-        '''
         mask_dict = dict([x[::-1] for x in enumerate(mask)])
         out_clouds = collections.defaultdict(list)
 
@@ -289,12 +278,13 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
             try:
                 #Keying into mask_dict is the only operation that ought to throw an exception 
                 out_clouds[mask_dict[temp[1]]].append(temp[0])
-                rht.update_progress(0.3+0.65*(1.0-len(point_dict)/problem_size), message=message)
+                rht.update_progress(0.4+0.65*(1.0-len(point_dict)/problem_size), message=message)
             except Exception:
                 continue
 
         while len(out_clouds) > 0:
-            unprocessed.append(out_clouds.popitem()[1])
+            #unprocessed.append(out_clouds.popitem()[1])
+            list_of_HDUs.append(Cloud(out_clouds.popitem()[1]).to_ImageHDU())
 
         rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
         '''
@@ -316,17 +306,19 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         plt.close()
         plt.ioff()
     '''
-    unprocessed.sort(key=len, reverse=True)
-    if DEBUG:
-        print map(len, unprocessed)
+    #unprocessed.sort(key=len, reverse=True)
+    #if DEBUG:
+    #print map(len, unprocessed)
 
     #Convert lists of two-integer tuples into ImageHDUs
-    output_hdulist = fits.HDUList(map(Cloud.to_ImageHDU, map(Cloud, unprocessed)))
-    del unprocessed
+    list_of_HDUs.sort(key=lambda h: h.header['DIAG'], reverse=True)
+    output_hdulist = fits.HDUList(list_of_HDUs)
+    #output_hdulist = fits.HDUList(map(Cloud.to_ImageHDU, map(Cloud, unprocessed)))
+    #del unprocessed
 
     #Output HDUList to File
     output_filename = string.join(string.rsplit(xyt_filename, '.', 1), SUFFIX)
-    #output_hdulist.insert(0, fits.ImageHDU(data=backprojection_with_sets, header=fits.Header()))
+    #TODO output_hdulist.insert(0, fits.ImageHDU(data=backprojection_with_sets, header=fits.Header()))
     output_hdulist.insert(0, hdu_list[0].copy()) #TODO Introduces Errors in Reading FITS File 
     output_hdulist.writeto(output_filename, output_verify='silentfix', clobber=True, checksum=True)
 
@@ -349,8 +341,11 @@ if __name__ == "__main__":
 
     #Do Processing
     for xyt_filename in args.files: # loop over input files
-        show(isolate_all(xyt_filename))
-        #isolate_all(xyt_filename)
+        if SUFFIX not in xyt_filename:
+            show(isolate_all(xyt_filename))
+            #isolate_all(xyt_filename)
+        else:
+            show(average_column_density(xyt_filename))
 
     #Cleanup and Exit
     #exit()
