@@ -633,7 +633,7 @@ def all_thetas(wlen, theta, original):
     return out 
 
 
-def theta_rht(theta_array, original, uv=False):
+def theta_rht(theta_array, original=True):
     # Maps an XYT cube into a 2D Array of angles- weighted by their significance.
     if original:
         thetas = np.linspace(0.0, np.pi, len(theta_array), endpoint=False, retstep=False)
@@ -652,13 +652,8 @@ def theta_rht(theta_array, original, uv=False):
         xs = theta_array*np.cos(thetas)    
         angle = np.arctan2(np.sum(ys), np.sum(xs)) 
         
-    if not uv:
-        # Returns the <theta>_rht as described by Clark, Peek, & Putman for a given array.
-        return angle
-    else:
-        # Maps an array of theta power to an angle, and the components of one unit vector.
-        # Designed for use with plt.quiver()
-        return angle, np.cos(2*angle), np.sin(2*angle)
+    # Returns the <theta>_rht as described by Clark, Peek, & Putman for a given array.
+    return angle
 
 
 def buffershape(ntheta, filesize=FILECAP):

@@ -19,12 +19,6 @@ import operator
 import collections
 import networkx as nx
 
-#import matplotlib
-#matplotlib.rcParams['image.origin'] = 'lower'
-#matplotlib.rcParams['figure.figsize'] = 6,6
-#matplotlib.rcParams['figure.dpi'] = 80
-
-import matplotlib.pyplot as plt
 import numpy as np
 import rht
 
@@ -133,67 +127,50 @@ print ''
 #-----------------------------------------------------------------------------------------
 
 def show(filaments_filename):
+    import matplotlib
+    #matplotlib.rcParams['backend'] = 'TkAgg'
+    matplotlib.rcParams['image.origin'] = 'lower'
+    #matplotlib.rcParams['figure.figsize'] = 6,6
+    #matplotlib.rcParams['figure.dpi'] = 180
+    from matplotlib import pyplot as plt
+
     assert filaments_filename.endswith('.fits')
     assert '_xyt' in filaments_filename
     assert SUFFIX in filaments_filename
     print 'Accessing: '+filaments_filename+' '
 
-    '''
-    hdu_list = filter(lambda h: int(h.header['LITPIX'])>5, fits.open(filaments_filename, mode='readonly', memmap=True, save_backup=False, checksum=True)[1:]) #Allows for reading in very large files!
-
-    NPlots = len(hdu_list)-1
-    npages = int(math.ceil(NPlots/4)) 
-    for page in range(npages):
-        #plt.title('Filaments in: '+filaments_filename)
-        for figure in range(4*page, min(4*(page+1), NPlots)):
-            plt.subplot(2,2, (figure%4)+1)
-            #plt.spy(hdu_list[figure+1].data, origin='lower')
-            plt.contour(hdu_list[figure+1].data)
-        plt.show()
-        plt.cla()
-    '''
     hdu_list = fits.open(filaments_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
     display = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
-    
-    plt.ion()
-    plt.imshow(display)
-    plt.draw()
-    
-    for i, hdu in enumerate(hdu_list):
-        if i==0:
-            #First HDU is the Backprojection
-            continue
 
-        hdr = hdu.header
-        min_x, min_y = hdr['MIN_X'], hdr['MIN_Y']
-        #max_x, max_y = hdr['MAX_X'], hdr['MAX_Y']
+    skip = 1
+    '''
+    if len(hdu_list) < 100:
+        plt.ion()
+        plt.imshow(display.T)
+        plt.draw()
         
-        mask = np.copy(np.nonzero(hdu.data))
-        
-        mask[0] += min_x 
-        mask[1] += min_y
-        for coord in zip(mask[0], mask[1]):
-            display[coord] = i  
-        
+        for i, hdu in enumerate(hdu_list[skip:]):
+            hdr = hdu.header
+            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = i
+            plt.cla()
+            plt.clf()
+            plt.imshow(display.T)
+            plt.draw()
+
         plt.cla()
         plt.clf()
-        plt.imshow(display)
-        plt.draw()
-    
-    print 'cla'
-    plt.cla()
-    print 'clf'
-    plt.clf()
-    print 'close'
-    plt.close()
-    print 'ioff'
-    plt.ioff()
-    print 'imshow'
-    
-    plt.imshow(display)
-    print 'show'
+        plt.close()
+        plt.ioff()
+        plt.imshow(display.T*hdu_list[0].data)
+        plt.show()
+
+    else:
+    '''
+    for i, hdu in enumerate(hdu_list[skip:]):
+        hdr = hdu.header            
+        display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = i
+    plt.imshow(display.T)
     plt.show()
-    print 'done'
     
 def isolate_all(xyt_filename, BINS=6, DEBUG = True):
 
@@ -203,7 +180,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
     assert SUFFIX not in xyt_filename
     print 'Accessing: '+xyt_filename+' '
     hdu_list = fits.open(xyt_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
-    #ntheta = hdu_list[0].header['NTHETA']
+    ntheta = hdu_list[0].header['NTHETA']
     wlen = hdu_list[0].header['WLEN']
     frac = hdu_list[0].header['FRAC']
     naxis1 = hdu_list[0].header['NAXIS1']
@@ -213,19 +190,17 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
 
     
     #Compute TheteRHT for all pixels given, then bin by theta
-    def func(Hthet):
-        return int((rht.theta_rht(Hthet, original=True)*BINS)//np.pi)
-    C = np.asarray(map(func, hdu_list[1].data['hthets']))
-    del func
-
-    def rel_add(*tuples):
-        return tuple(map(sum, zip(*tuples)))
+    C = np.multiply(np.asarray(map(rht.theta_rht,hdu_list[1].data['hthets'])), BINS/np.pi).astype(np.int_)
+    
+    def rel_add((a,b), (c,d)):
+        return a+c,b+d
     '''
     if not DEBUG:
         plt.ion()
     '''
     #Set Assignment
     unprocessed = list()    
+    search_pattern = [(-1,-1), (-1, 0), (-1, 1), (0, -1)] #[(-1, 1), (-1,-1), (-1, 0), (0, -1), (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2), (-1, -2), (-1, 2), (0,-2)]
     for bin in range(BINS):
         delimiter = np.nonzero(C == bin)[0]
         raw_points = zip(Hi[delimiter],Hj[delimiter])
@@ -236,22 +211,20 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         point_dict = dict([x[::-1] for x in enumerate(raw_points)])
         set_dict = collections.defaultdict(list)
 
-        extent = [(-1,-1), (-1, 0), (-1, 1), (0, -1)] #[(-1, 1), (-1,-1), (-1, 0), (0, -1), (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2), (-1, -2), (-1, 2), (0,-2)] # #
         for i, coord in enumerate(raw_points):
             rht.update_progress(0.15*(i/problem_size), message=message)
-            for rel_coord in extent:
+            for rel_coord in search_pattern:
                 try:
                     j = point_dict[rel_add(coord, rel_coord)]
                     set_dict[point_dict[coord]].append(j)
                 except Exception:
                     continue
         
-        del extent 
         G = nx.from_dict_of_lists(set_dict) #Undirected graph made using set_dict as an adjacency list
         del set_dict 
         
         sources = range(problem_size)
-        flags = np.ones((problem_size), dtype=int)
+        flags = np.ones((problem_size), dtype=np.int_)
         while len(sources) > 0: 
             source = sources.pop()
             if not flags[source]:
@@ -260,15 +233,16 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
                 rht.update_progress(0.15+0.15*(1.0-len(sources)/problem_size), message=message)
                 try:
                     for member in nx.descendants(G, source):
-                        #sources.remove(member)
                         flags[member] = False
                         point_dict[raw_points[member]] = source
+                        #TODO Remove members from G if that would speed up subsequent calls?
                 except nx.NetworkXError:
-                    #Assume we hit an isolated pixel and move on
+                    #Assume we hit an isolated pixel (never made it into G) and move on
                     pass
+        del sources, flags, G
 
         #************************************************************************************************
-        finished_map = np.negative(np.ones((naxis1, naxis2), dtype=np.int64))
+        #finished_map = np.negative(np.ones((naxis1, naxis2), dtype=np.int64))
         #for pt in raw_points:
             #finished_map[pt] = point_dict[pt]
 
@@ -281,6 +255,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         mask = np.nonzero(histogram >= int(frac*wlen))[0]
         del histogram
 
+        '''
         first = True
         for set_id in mask:
             prog = 0.3+0.7*(1.0-len(point_dict)/problem_size)
@@ -295,7 +270,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
                 temp = point_dict.popitem()
                 if set_id == temp[1]:
                     out_cloud.append(temp[0])
-                    finished_map[temp[0]] = set_id
+                    #finished_map[temp[0]] = set_id
                 elif first and (temp[1] not in mask):
                     #del temp
                     continue
@@ -305,6 +280,21 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
             first = False
             point_dict = other_dict
             unprocessed.append(out_cloud)
+        '''
+        mask_dict = dict([x[::-1] for x in enumerate(mask)])
+        out_clouds = collections.defaultdict(list)
+
+        while len(point_dict) > 0:
+            temp = point_dict.popitem()
+            try:
+                #Keying into mask_dict is the only operation that ought to throw an exception 
+                out_clouds[mask_dict[temp[1]]].append(temp[0])
+                rht.update_progress(0.3+0.65*(1.0-len(point_dict)/problem_size), message=message)
+            except Exception:
+                continue
+
+        while len(out_clouds) > 0:
+            unprocessed.append(out_clouds.popitem()[1])
 
         rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
         '''
@@ -359,8 +349,8 @@ if __name__ == "__main__":
 
     #Do Processing
     for xyt_filename in args.files: # loop over input files
-        #show(isolate_all(xyt_filename))
-        isolate_all(xyt_filename)
+        show(isolate_all(xyt_filename))
+        #isolate_all(xyt_filename)
 
     #Cleanup and Exit
     #exit()
