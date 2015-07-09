@@ -128,19 +128,18 @@ class Cloud:
     
     def __init__(self, list_of_points):
         #Expects a python list of two-integer tuples, corresponding the the x,y coordinate of the points original location in the backprojection 
-
-        if isinstance(list_of_points, tuple):
-            if len(list_of_points) > 2:
-                list_of_points = list(list_of_points)
-            elif len(list_of_points) == 2:
-                list_of_points = [list_of_points]
-        if isinstance(list_of_points, set):
-            list_of_points = list(list_of_points)
         if isinstance(list_of_points, Cloud):
             self = list_of_points
             return 
-
-        self.points = list(set(list_of_points))
+        
+        elif isinstance(list_of_points, tuple):
+            if len(list_of_points) > 2:
+                self.points = list(set(list_of_points))
+            elif len(list_of_points) == 2:
+                self.points = [list_of_points]
+        
+        elif isinstance(list_of_points, set):
+            self.points = list(list_of_points)
 
         def proper_formatting(given):
             if not isinstance(given, list):
@@ -155,14 +154,8 @@ class Cloud:
                 if int(point[0])!=point[0] or int(point[1])!=point[1]:
                     raise TypeError('Points must contain integer coordinates'+repr(point))
             return True
-        #assert proper_formatting(list_of_points)
+        assert proper_formatting(self.points)
 
-        '''
-        self.min_x = min([point[0] for point in self.points])
-        self.min_y = min([point[1] for point in self.points])
-        self.max_x = max([point[0] for point in self.points])
-        self.max_y = max([point[1] for point in self.points])
-        '''
         self.points.sort(key=operator.itemgetter(0))    
         self.min_x, self.max_x = self.points[0][0], self.points[-1][0]
         self.points.sort(key=operator.itemgetter(1))    
@@ -174,26 +167,14 @@ class Cloud:
 #-----------------------------------------------------------------------------------------
 
 '''
-import matplotlib
-matplotlib.use('TKAgg')
-from matplotlib import pyplot as plt
-plt.ion()
-canvas = np.zeros_like(backproj)
-plt.plot(canvas)
-for cloud in list_of_Clouds:
-    canvas[cloud.min_x:][cloud.min_y:] += cloud.mask
-    plt.clf()
-    plt.plot(canvas)
-'''
-
-'''
 #STDOUT Progress Reporting
-while not done:
-    sys.stdout.write('\rSay {0} to {1}!'.format(zeroth, first))
+#Eqivalent to map(do, things)
+constant = 100/len(things)
+for i, thing in things:
+    sys.stdout.write('\r'+str(i*constant)+'%... ')
     sys.stdout.flush()
-    #DO this_tuff
-    #done?
-sys.stdout.write('\rDone with {0}!'.format(this_stuff))
+    do(thing)
+sys.stdout.write('\rDone!')
 sys.stdout.flush()
 print ''
 '''
@@ -203,35 +184,37 @@ print ''
 #-----------------------------------------------------------------------------------------
 skip = 1 #Number of HDUs that do not correspond to filaments in output files
 
-def average_column_density(filaments_filename):
+source_data = dict()
+source_data['COLDENS'] = np.asarray(fits.open('D:/LAB_corrected_coldens.fits', mode='readonly', memmap=False, save_backup=False, checksum=True)[0].data)
+
+def filament_average(filaments_filename, key, external_source=None):
     assert filaments_filename.endswith('.fits')
     assert '_xyt' in filaments_filename
     assert SUFFIX in filaments_filename
+    assert isinstance(key, str) #TODO for now?
+
     print 'Accessing: '+filaments_filename+' '
-
     hdu_list = fits.open(filaments_filename, mode='update', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
+
+    if key in hdu_list[skip].header:
+        print key+' keyword found in filament header...'
+        if raw_input('Overwrite? [n]/y') != 'y':
+            return hdu_list, key
+
+    if external_source is not None:
+        correlation_data = external_source
+    elif key in source_data:
+        correlation_data = source_data[key]
+    else:
+        raise KeyError('No source corresponding to the key: '+key)
     
-    coldens = 'COLDENS'
-    if coldens in hdu_list[skip].header:
-        print coldens+' keyword found in filament header...'
-        if raw_input('Exit or Overwrite? [exit]/o') != 'o':
-            return filaments_filename, coldens
-
-    correlation_data = np.asarray(fits.open('D:/LAB_corrected_coldens.fits', mode='readonly', memmap=False, save_backup=False, checksum=True)[0].data)
-    #from matplotlib import pyplot as plt
-    #plt.imshow(correlation_data)
-    #plt.show()
-
     for i, hdu in enumerate(hdu_list[skip:]):
-        rht.update_progress(i/len(hdu_list))
         hdr = hdu.header
-        hdr[coldens] = np.nanmean(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][np.nonzero(hdu.data.T)])
-    
-    rht.update_progress(1.0)
-    hdu_list.flush()
-    hdu_list.close()
-    return filaments_filename, coldens
+        hdr[key] = np.nanmean(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][np.nonzero(hdu.data.T)])
 
+    hdu_list.flush()
+    #hdu_list.close()
+    return hdu_list, key
 
 def show(filaments_filename, key=None):
     import matplotlib
@@ -241,12 +224,21 @@ def show(filaments_filename, key=None):
     #matplotlib.rcParams['figure.dpi'] = 180
     from matplotlib import pyplot as plt
 
-    assert filaments_filename.endswith('.fits')
-    assert '_xyt' in filaments_filename
-    assert SUFFIX in filaments_filename
-    print 'Accessing: '+filaments_filename+' '
+    if isinstance(filaments_filename, str):
+        assert filaments_filename.endswith('.fits')
+        assert '_xyt' in filaments_filename
+        assert SUFFIX in filaments_filename
+        print 'Accessing: '+filaments_filename+' '
 
-    hdu_list = fits.open(filaments_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
+        hdu_list = fits.open(filaments_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
+    
+    elif isinstance(filaments_filename, fits.HDUList):
+        hdu_list = filaments_filename
+
+    else:
+        print 'Unknown input in show'
+        return 
+
     display = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
 
     if key is None:
@@ -263,7 +255,56 @@ def show(filaments_filename, key=None):
 
     plt.imshow(display.T)
     plt.show()
+
+def plot(out_name, filaments_filename, key=None):
+    import matplotlib
+    #matplotlib.rcParams['backend'] = 'TkAgg'
+    matplotlib.rcParams['image.origin'] = 'lower'
+    #matplotlib.rcParams['figure.figsize'] = 6,6
+    #matplotlib.rcParams['figure.dpi'] = 200
+    from matplotlib import pyplot as plt
+
+    if isinstance(filaments_filename, str):
+        assert filaments_filename.endswith('.fits')
+        assert '_xyt' in filaments_filename
+        assert SUFFIX in filaments_filename
+        print 'Accessing: '+filaments_filename+' '
+
+        hdu_list = fits.open(filaments_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
     
+    elif isinstance(filaments_filename, fits.HDUList):
+        hdu_list = filaments_filename
+
+    else:
+        print 'Unknown input in plot'
+        return 
+
+    display = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
+
+    if key is None:
+        for i, hdu in enumerate(hdu_list[skip:]):
+            hdr = hdu.header            
+            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = i
+    elif isinstance(key, str):
+        for hdu in hdu_list[skip:]:
+            hdr = hdu.header            
+            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = hdr[key]
+    else:
+        print 'Unable to plot data using the given key: '+str(key)
+        return
+
+    plt.imshow(display.T)
+    plt.colorbar(aspect=3)
+    plt.savefig(out_name, dpi=500, format='png')
+    plt.clf()
+
+    if key is not None and isinstance(filaments_filename, str):
+        lol = map(lambda h: h.header[key], hdu_list[skip:])
+        plt.hist(lol, bins=100, histtype='stepfilled', log=(key == 'COLDENS'), label=key+' from '+filaments_filename)
+        hist_name = string.rstrip(out_name, '.png')+'_hist'+'.png'
+        plt.savefig(hist_name, dpi=500, format='png')
+        plt.clf() 
+
 def isolate_all(xyt_filename, BINS=6, DEBUG = True):
 
     #Read in RHT Output from filename_xyt??.fits
@@ -282,15 +323,6 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
     Hj = hdu_list[1].data['hj'] 
 
     #Compute TheteRHT for all pixels given, then bin by theta
-    '''
-    if original:
-        thetas = 2.0*np.linspace(0.0, np.pi, ntheta, endpoint=False, retstep=False)
-        C = np.multiply(np.mod(0.5*np.arctan2(np.sum(hdu_list[1].data['hthets']*np.sin(thetas)), np.sum(hdu_list[1].data['hthets']*np.cos(thetas))), np.pi), BINS/np.pi).astype(np.int_)
-        del thetas
-    else:
-        thetas = np.linspace(0.0, 2*np.pi, ntheta, endpoint=False, retstep=False)
-        C = np.multiply(np.arctan2(np.sum(hdu_list[1].data['hthets']*np.sin(thetas)), np.sum(hdu_list[1].data['hthets']*np.cos(thetas))), BINS/np.pi).astype(np.int_) 
-    '''
     C = np.multiply(np.asarray(map(rht.theta_rht,hdu_list[1].data['hthets'])), BINS/np.pi).astype(np.int_)
     
     def rel_add((a,b), (c,d)):
@@ -438,8 +470,11 @@ if __name__ == "__main__":
             show(isolate_all(xyt_filename))
             #isolate_all(xyt_filename)
         else:
-            show(*average_column_density(xyt_filename))
+            show(*filament_average(xyt_filename, key='COLDENS'))
             #show(xyt_filename)
+
+
+
     #Cleanup and Exit
     #exit()
 
