@@ -12,6 +12,7 @@ from argparse import ArgumentDefaultsHelpFormatter
 
 import math
 import sys
+import time
 import string
 import copy
 import itertools
@@ -31,6 +32,80 @@ SUFFIX = '_filaments.'
 #-----------------------------------------------------------------------------------------
 # Initialization: Object Definitions
 #-----------------------------------------------------------------------------------------
+
+class Progress:
+    # Create progress meter that looks like: 
+    # message + ' ' + '[' + '#'*p + ' '*(length-p) + ']' + time_message
+    stream = sys.stdout
+    all_progress = list()
+    TEXTWIDTH = 79
+    length = int(0.55 * TEXTWIDTH)
+
+    def update(self, progress=None):
+        return progress
+        if progress is None:
+            if self._incrementing:
+                self._step += 1
+            else:
+                self._step -= 1
+        elif isinstance(progress, int) and (self._problem_size >= progress >= 0):
+            self._step = progress
+        elif isinstance(progress, float) and (1.0 >= progress >= 0.0):
+            self._step = int(self._problem_size*progress)
+        else:
+            return #TODO
+
+        now = time.time()
+        if (self._stop_time is None) or (self._step == 0) or (self._step == self._problem_size) or ((now - self._last_update) > 1.0):
+            if self._incrementing:
+                prog = self._step/self._problem_size
+            else:
+                prog = 1.0 - (self._step/self._problem_size)
+            
+            self._stop_time = self._start_time + (now - self._start_time)/prog
+        
+            sec_remaining = int(self._stop_time - now)
+            if sec_remaining >= 3600:
+                time_message = ' < ' + str(sec_remaining//3600  +1) + 'hrs'
+            elif sec_remaining >= 60:
+                time_message = ' < ' + str(sec_remaining//60  +1) + 'min'
+            else:
+                time_message = ' < ' + str(sec_remaining +1) + 'sec'
+            messlen = Progress.TEXTWIDTH-(Progress.length+3)-len(time_message)
+            p = int(Progress.length*prog)
+            if 0 <= p < Progress.length:
+                Progress.stream.write('\r{2} [{0}{1}]{3}'.format('#'*p, ' '*(Progress.length-p), string.ljust(self._message, messlen)[:messlen], time_message))
+                Progress.stream.flush()
+            else:
+                final_offset = Progress.TEXTWIDTH-len(time_message)
+                final_message = string.ljust('Finished:', final_offset)[:final_offset]
+                Progress.stream.write('\r{0}{1}'.format(final_message, time_message))
+                Progress.stream.flush()
+                try:
+                    Progress.all_progress.remove(self)
+                    if len(Progress.all_progress) == 0:
+                        print ''
+                except Exception:
+                    pass
+                
+    def __init__(self, problem_size, message='Progress:', incrementing=True):
+        assert isinstance(problem_size, int)
+        assert problem_size > 0
+        assert isinstance(message, str)
+        assert isinstance(incrementing, bool)
+
+        self._start_time = time.time()
+        self._stop_time = None
+        self._message = message
+        self._incrementing = incrementing
+        self._problem_size = problem_size
+        if self._incrementing:
+            self._step = 0
+        else:
+            self._step = self._problem_size
+        self._last_update = self._start_time
+        Progress.all_progress.append(self)
+
 
 class Cloud:
     def make_mask(self):
@@ -135,23 +210,26 @@ def average_column_density(filaments_filename):
     print 'Accessing: '+filaments_filename+' '
 
     hdu_list = fits.open(filaments_filename, mode='update', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
-    correlation_data = np.asarray(fits.open('D:/LAB_corrected_coldens.fits', mode='readonly', memmap=False, save_backup=False, checksum=True)[0].data)
-    from matplotlib import pyplot as plt
-    plt.imshow(correlation_data)
-    plt.show()
-
+    
     coldens = 'COLDENS'
-
     if coldens in hdu_list[skip].header:
         print coldens+' keyword found in filament header...'
         if raw_input('Exit or Overwrite? [exit]/o') != 'o':
             return filaments_filename, coldens
 
-    for hdu in hdu_list[skip:]:
+    correlation_data = np.asarray(fits.open('D:/LAB_corrected_coldens.fits', mode='readonly', memmap=False, save_backup=False, checksum=True)[0].data)
+    #from matplotlib import pyplot as plt
+    #plt.imshow(correlation_data)
+    #plt.show()
+
+    for i, hdu in enumerate(hdu_list[skip:]):
+        rht.update_progress(i/len(hdu_list))
         hdr = hdu.header
-        stuff = correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1]
-        print stuff
-        hdr[coldens] = np.average(stuff[np.nonzero(hdu.data.T)])
+        hdr[coldens] = np.nanmean(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][np.nonzero(hdu.data.T)])
+    
+    rht.update_progress(1.0)
+    hdu_list.flush()
+    hdu_list.close()
     return filaments_filename, coldens
 
 
@@ -199,11 +277,20 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
     frac = hdu_list[0].header['FRAC']
     naxis1 = hdu_list[0].header['NAXIS1']
     naxis2 = hdu_list[0].header['NAXIS2']
+    original = hdu_list[0].header['ORIGINAL']
     Hi = hdu_list[1].data['hi'] 
     Hj = hdu_list[1].data['hj'] 
 
-    
     #Compute TheteRHT for all pixels given, then bin by theta
+    '''
+    if original:
+        thetas = 2.0*np.linspace(0.0, np.pi, ntheta, endpoint=False, retstep=False)
+        C = np.multiply(np.mod(0.5*np.arctan2(np.sum(hdu_list[1].data['hthets']*np.sin(thetas)), np.sum(hdu_list[1].data['hthets']*np.cos(thetas))), np.pi), BINS/np.pi).astype(np.int_)
+        del thetas
+    else:
+        thetas = np.linspace(0.0, 2*np.pi, ntheta, endpoint=False, retstep=False)
+        C = np.multiply(np.arctan2(np.sum(hdu_list[1].data['hthets']*np.sin(thetas)), np.sum(hdu_list[1].data['hthets']*np.cos(thetas))), BINS/np.pi).astype(np.int_) 
+    '''
     C = np.multiply(np.asarray(map(rht.theta_rht,hdu_list[1].data['hthets'])), BINS/np.pi).astype(np.int_)
     
     def rel_add((a,b), (c,d)):
@@ -222,12 +309,14 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         del delimiter
         problem_size = len(raw_points)
         message='Step '+str(bin+1)+'/'+str(BINS)+': (N='+str(problem_size)+')'
+        progress_bar = Progress(problem_size, message=message, incrementing=True)
 
         point_dict = dict([x[::-1] for x in enumerate(raw_points)])
         set_dict = collections.defaultdict(list)
 
-        for i, coord in enumerate(raw_points):
-            rht.update_progress(0.2*(i/problem_size), message=message)
+        for coord in raw_points:
+            #rht.update_progress(0.3*(i/problem_size), message=message)
+            progress_bar.update()
             for rel_coord in search_pattern:
                 try:
                     j = point_dict[rel_add(coord, rel_coord)]
@@ -238,6 +327,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         G = nx.from_dict_of_lists(set_dict) #Undirected graph made using set_dict as an adjacency list
         del set_dict 
         
+        progress_bar = Progress(problem_size, message=message, incrementing=False)
         sources = range(problem_size)
         flags = np.ones((problem_size), dtype=np.int_)
         while len(sources) > 0: 
@@ -245,7 +335,8 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
             if not flags[source]:
                 continue
             else:
-                rht.update_progress(0.2+0.2*(1.0-len(sources)/problem_size), message=message)
+                #rht.update_progress(0.3+0.3*(1.0-len(sources)/problem_size), message=message)
+                progress_bar.update(len(sources))
                 try:
                     for member in nx.descendants(G, source):
                         flags[member] = False
@@ -270,6 +361,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         mask = np.nonzero(histogram >= int(frac*wlen))[0]
         del histogram
 
+        progress_bar = Progress(problem_size, message=message, incrementing=False)
         mask_dict = dict([x[::-1] for x in enumerate(mask)])
         out_clouds = collections.defaultdict(list)
 
@@ -278,7 +370,8 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
             try:
                 #Keying into mask_dict is the only operation that ought to throw an exception 
                 out_clouds[mask_dict[temp[1]]].append(temp[0])
-                rht.update_progress(0.4+0.65*(1.0-len(point_dict)/problem_size), message=message)
+                progress_bar.update(len(point_dict))
+                #rht.update_progress(0.6+0.399*(1.0-len(point_dict)/problem_size), message=message)
             except Exception:
                 continue
 
@@ -286,7 +379,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
             #unprocessed.append(out_clouds.popitem()[1])
             list_of_HDUs.append(Cloud(out_clouds.popitem()[1]).to_ImageHDU())
 
-        rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
+        #rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
         '''
         try:
             plt.imshow(finished_map)#+1)
@@ -345,8 +438,8 @@ if __name__ == "__main__":
             show(isolate_all(xyt_filename))
             #isolate_all(xyt_filename)
         else:
-            show(average_column_density(xyt_filename))
-
+            show(*average_column_density(xyt_filename))
+            #show(xyt_filename)
     #Cleanup and Exit
     #exit()
 

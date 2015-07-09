@@ -655,7 +655,6 @@ def theta_rht(theta_array, original=True):
     # Returns the <theta>_rht as described by Clark, Peek, & Putman for a given array.
     return angle
 
-
 def buffershape(ntheta, filesize=FILECAP):
     # Shape of maximum sized array that can fit into a single buffer file. 
     ntheta = int(ntheta)
