@@ -161,44 +161,62 @@ class Cloud:
         self.points.sort(key=operator.itemgetter(1))    
         self.min_y, self.max_y = self.points[0][1], self.points[-1][1]
         
-
 #-----------------------------------------------------------------------------------------
-# Rough Code
-#-----------------------------------------------------------------------------------------
-
-'''
-#STDOUT Progress Reporting
-#Eqivalent to map(do, things)
-constant = 100/len(things)
-for i, thing in things:
-    sys.stdout.write('\r'+str(i*constant)+'%... ')
-    sys.stdout.flush()
-    do(thing)
-sys.stdout.write('\rDone!')
-sys.stdout.flush()
-print ''
-'''
-
-#-----------------------------------------------------------------------------------------
-# Bulk Fiber Isolation Functions
+# Post-Processing Functions
 #-----------------------------------------------------------------------------------------
 skip = 1 #Number of HDUs that do not correspond to filaments in output files
+#default_key = 'LITPIX' 
 
 source_data = dict()
-source_data['COLDENS'] = np.asarray(fits.open('D:/LAB_corrected_coldens.fits', mode='readonly', memmap=False, save_backup=False, checksum=True)[0].data)
+source_data['COLDENS'] = fits.open('D:/LAB_corrected_coldens.fits', mode='readonly', memmap=True, save_backup=False, checksum=True)[0].data
+source_data['INTGALFA'] = fits.open('D:/SC_241.66_28.675.best.fits', mode='readonly', memmap=True, save_backup=False, checksum=True)[0].data.sum(axis=0)
 
-def filament_average(filaments_filename, key, external_source=None):
-    assert filaments_filename.endswith('.fits')
-    assert '_xyt' in filaments_filename
-    assert SUFFIX in filaments_filename
-    assert isinstance(key, str) #TODO for now?
+def identity(): 
+    def I(args):
+        return args
+    return I 
+post_processing = collections.defaultdict(identity)
+post_processing['COLDENS'] = np.log10
+post_processing['INTGALFA'] = np.log10
 
-    print 'Accessing: '+filaments_filename+' '
-    hdu_list = fits.open(filaments_filename, mode='update', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
+methods = dict()
+methods['AVG_']=np.nanmean
+methods['MED_']=scipy.stats.nanmedian
+methods['TOT_']=np.nansum
+
+def handle(fileobj):
+
+    if isinstance(fileobj, str):
+        assert fileobj.endswith('.fits')
+        assert '_xyt' in fileobj
+        assert SUFFIX in fileobj
+        print 'Accessing: '+fileobj+' '
+        hdu_list = fits.open(fileobj, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
+        filaments_filename = fileobj
+
+    elif isinstance(fileobj, fits.HDUList):
+        hdu_list = fileobj
+        filaments_filename = hdu_list.filename()
+        assert filaments_filename.endswith('.fits')
+        assert '_xyt' in filaments_filename
+        assert SUFFIX in filaments_filename
+
+    else:
+        raise ValueError(repr(fileobj))
+
+    #xyt_filename = string.rstrip(filaments_filename, SUFFIX+'fits')+'.fits' TODO xyt?
+
+    return filaments_filename, hdu_list
+
+def filament_properties(filaments_filename, key, external_source=None):
+    #Computes the average value of the dataset indicated by key or external_source for each filament
+    #Saves the value to the associated header entry of each filament
+    assert isinstance(key, str)
+    filaments_filename, hdu_list = handle(filaments_filename)
 
     if key in hdu_list[skip].header:
         print key+' keyword found in filament header...'
-        if raw_input('Overwrite? [n]/y') != 'y':
+        if 'y' not in raw_input('Overwrite? [n]/y'):
             return hdu_list, key
 
     if external_source is not None:
@@ -206,79 +224,29 @@ def filament_average(filaments_filename, key, external_source=None):
     elif key in source_data:
         correlation_data = source_data[key]
     else:
-        raise KeyError('No source corresponding to the key: '+key)
-    
+        raise KeyError('No source to average over for key: '+key)
+
     for i, hdu in enumerate(hdu_list[skip:]):
-        hdr = hdu.header
-        hdr[key] = np.nanmean(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][np.nonzero(hdu.data.T)])
+        for prefix, func in methods.iteritems():        
+            hdr = hdu.header
+            hdr[prefix+key] = func(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][np.nonzero(hdu.data.T)])
+        hdr[key] = key
 
     hdu_list.flush()
-    #hdu_list.close()
     return hdu_list, key
 
-def show(filaments_filename, key=None):
-    import matplotlib
-    #matplotlib.rcParams['backend'] = 'TkAgg'
-    matplotlib.rcParams['image.origin'] = 'lower'
-    #matplotlib.rcParams['figure.figsize'] = 6,6
-    #matplotlib.rcParams['figure.dpi'] = 180
-    from matplotlib import pyplot as plt
-
-    if isinstance(filaments_filename, str):
-        assert filaments_filename.endswith('.fits')
-        assert '_xyt' in filaments_filename
-        assert SUFFIX in filaments_filename
-        print 'Accessing: '+filaments_filename+' '
-
-        hdu_list = fits.open(filaments_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
-    
-    elif isinstance(filaments_filename, fits.HDUList):
-        hdu_list = filaments_filename
-
-    else:
-        print 'Unknown input in show'
-        return 
-
-    display = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
-
-    if key is None:
-        for i, hdu in enumerate(hdu_list[skip:]):
-            hdr = hdu.header            
-            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = i
-    elif isinstance(key, str):
-        for hdu in hdu_list[skip:]:
-            hdr = hdu.header            
-            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = hdr[key]
-    else:
-        print 'Unable to show data using the given key: '+str(key)
-        return
-
-    plt.imshow(display.T)
-    plt.show()
+import matplotlib
+#matplotlib.rcParams['backend'] = 'TkAgg'
+matplotlib.rcParams['image.origin'] = 'lower'
+#matplotlib.rcParams['figure.figsize'] = 6,6
+#matplotlib.rcParams['figure.dpi'] = 200
+from matplotlib import pyplot as plt
+from matplotlib import gridspec
 
 def plot(out_name, filaments_filename, key=None):
-    import matplotlib
-    #matplotlib.rcParams['backend'] = 'TkAgg'
-    matplotlib.rcParams['image.origin'] = 'lower'
-    #matplotlib.rcParams['figure.figsize'] = 6,6
-    #matplotlib.rcParams['figure.dpi'] = 200
-    from matplotlib import pyplot as plt
-
-    if isinstance(filaments_filename, str):
-        assert filaments_filename.endswith('.fits')
-        assert '_xyt' in filaments_filename
-        assert SUFFIX in filaments_filename
-        print 'Accessing: '+filaments_filename+' '
-
-        hdu_list = fits.open(filaments_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
-    
-    elif isinstance(filaments_filename, fits.HDUList):
-        hdu_list = filaments_filename
-
-    else:
-        print 'Unknown input in plot'
-        return 
-
+        
+    assert isinstance(out_name, str)
+    filaments_filename, hdu_list = handle(filaments_filename)
     display = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
 
     if key is None:
@@ -288,22 +256,37 @@ def plot(out_name, filaments_filename, key=None):
     elif isinstance(key, str):
         for hdu in hdu_list[skip:]:
             hdr = hdu.header            
-            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = hdr[key]
+            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = hdr[key] #post_processing[key](hdr[key])
     else:
         print 'Unable to plot data using the given key: '+str(key)
         return
 
-    plt.imshow(display.T)
-    plt.colorbar(aspect=3)
-    plt.savefig(out_name, dpi=500, format='png')
-    plt.clf()
+    figure_args = {'figsize':(11,8.5), 'facecolor':'white','dpi':200}
+        
+    if key is not None:
+        #fig, (ax1, ax2) = plt.subplots(1,2,sharey='row', **figure_args)
 
-    if key is not None and isinstance(filaments_filename, str):
-        lol = map(lambda h: h.header[key], hdu_list[skip:])
-        plt.hist(lol, bins=100, histtype='stepfilled', log=(key == 'COLDENS'), label=key+' from '+filaments_filename)
-        hist_name = string.rstrip(out_name, '.png')+'_hist'+'.png'
-        plt.savefig(hist_name, dpi=500, format='png')
-        plt.clf() 
+        plt.figure(**figure_args)
+        gs = gridspec.GridSpec(1, 10)
+        ax1 = plt.subplot(gs[0:-1]) #plt.subplot2grid((1,10), (0,0), colspan=9)
+        ax2 = plt.subplot(gs[-1]) #plt.subplot2grid((1,10), (0,1), colspan=1)
+
+        #data_only = map(operator.itemgetter(key), map(operator.attrgetter('header'), hdu_list[skip:]))
+        ax2.hist(map(operator.itemgetter(key), map(operator.attrgetter('header'), hdu_list[skip:])), bins=100, orientation='horizontal', histtype='stepfilled')#,log=(post_processing[key]==np.log10))
+    else:
+        fig = plt.figure(**figure_args)
+        ax1 = fig.add_axes([0.0,0.0,1.0,1.0])
+
+    #aspect=display.shape[1]/(0.15*display.shape[0])
+    plt.colorbar(ax1.imshow(display.T, cmap = "RdBu"), ax=ax1, fraction=0.10) #, aspect=aspect)
+    plt.suptitle(key+' from '+filaments_filename, fontsize=18)
+    plt.savefig(out_name, dpi=500, format='png')
+    plt.show()
+    plt.clf() 
+
+#-----------------------------------------------------------------------------------------
+# Bulk Fiber Isolation Functions
+#-----------------------------------------------------------------------------------------
 
 def isolate_all(xyt_filename, BINS=6, DEBUG = True):
 
