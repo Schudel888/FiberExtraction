@@ -21,5 +21,4 @@ for i in ls:
         filename = inprefix+str(i)+insuffix
         key = j
         isolate.plot(outname, filename, key)
-
-
+        

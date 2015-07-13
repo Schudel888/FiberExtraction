@@ -3,26 +3,30 @@
 #Susan Clark, Lowell Schudel
 
 #-----------------------------------------------------------------------------------------
-#Imports
+# Initialization: Imports
 #-----------------------------------------------------------------------------------------
 from __future__ import division #Must be first line of code in the file
 from astropy.io import fits
-from argparse import ArgumentParser
-from argparse import ArgumentDefaultsHelpFormatter
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
-import math
 import sys
-import time
 import string
-import copy
-import itertools
 import operator
 import collections
 import networkx as nx
 import datetime
-
+import scipy.stats
 import numpy as np
-import rht
+
+import matplotlib
+#matplotlib.rcParams['backend'] = 'TkAgg'
+matplotlib.rcParams['image.origin'] = 'lower'
+#matplotlib.rcParams['figure.figsize'] = 6,6
+#matplotlib.rcParams['figure.dpi'] = 200
+from matplotlib import pyplot as plt
+from matplotlib import gridspec
+
+import rht #Latest version @https://github.com/seclark/RHT
 
 #-----------------------------------------------------------------------------------------
 # Initialization: Program Settings
@@ -30,114 +34,43 @@ import rht
 
 SUFFIX = '_filaments.'
 
+skip = 1 #Number of HDUs that do not correspond to filaments in output files
+
+source_data = dict()
+try:
+    source_data['COLDENS'] = fits.open('D:/LAB_corrected_coldens.fits', mode='readonly', memmap=True, save_backup=False, checksum=True)[0].data
+except Exception:
+    print "WARNING: Unable to find source data for COLDENS Keyword at D:/LAB_corrected_coldens.fits" #pass #TODO Bad Source Data Location
+
+#source_data['INTGALFA'] = fits.open('D:/SC_241.66_28.675.best.fits', mode='readonly', memmap=True, save_backup=False, checksum=True)[0].data.sum(axis=0)
+
+def identity(): 
+    def I(args):
+        return args
+    return I 
+post_processing = collections.defaultdict(identity)
+post_processing['COLDENS'] = np.log10
+
+#Known methods that can produce a single value from a masked area of source data
+methods = dict()
+methods['_AVG']=np.nanmean
+methods['_MED']=scipy.stats.nanmedian
+methods['_TOT']=np.nansum
+
 #-----------------------------------------------------------------------------------------
-# Initialization: Object Definitions
+# Initialization: Class Definitions
 #-----------------------------------------------------------------------------------------
-
-class Progress:
-    # Create progress meter that looks like: 
-    # message + ' ' + '[' + '#'*p + ' '*(length-p) + ']' + time_message
-    stream = sys.stdout
-    all_progress = list()
-    TEXTWIDTH = 79
-    length = int(0.55 * TEXTWIDTH)
-
-    def append(self, child):
-        if not isinstance(child, Progress):
-            raise ValueError('You can only append some Progress to existing Progress!')
-        elif self == child:
-            raise ValueError('Progress cannot be appended to itself!')
-        elif child in self._children:
-            
-        else:
-            self._children.append(child)
-
-
-
-    def update(self, progress=None):
-        return progress
-        if progress is None:
-            if self._incrementing:
-                self._step += 1
-            else:
-                self._step -= 1
-        elif isinstance(progress, int) and (self._problem_size >= progress >= 0):
-            self._step = progress
-        elif isinstance(progress, float) and (1.0 >= progress >= 0.0):
-            self._step = int(self._problem_size*progress)
-        else:
-            return #TODO
-
-        now = time.time()
-        if (self._stop_time is None) or (self._step == 0) or (self._step == self._problem_size) or ((now - self._last_update) > 1.0):
-            if self._incrementing:
-                prog = self._step/self._problem_size
-            else:
-                prog = 1.0 - (self._step/self._problem_size)
-            
-            self._stop_time = self._start_time + (now - self._start_time)/prog
-        
-            sec_remaining = int(self._stop_time - now)
-            if sec_remaining >= 3600:
-                time_message = ' < ' + str(sec_remaining//3600  +1) + 'hrs'
-            elif sec_remaining >= 60:
-                time_message = ' < ' + str(sec_remaining//60  +1) + 'min'
-            else:
-                time_message = ' < ' + str(sec_remaining +1) + 'sec'
-            messlen = Progress.TEXTWIDTH-(Progress.length+3)-len(time_message)
-            p = int(Progress.length*prog)
-            if 0 <= p < Progress.length:
-                Progress.stream.write('\r{2} [{0}{1}]{3}'.format('#'*p, ' '*(Progress.length-p), string.ljust(self._message, messlen)[:messlen], time_message))
-                Progress.stream.flush()
-            else:
-                final_offset = Progress.TEXTWIDTH-len(time_message)
-                final_message = string.ljust('Finished:', final_offset)[:final_offset]
-                Progress.stream.write('\r{0}{1}'.format(final_message, time_message))
-                Progress.stream.flush()
-                try:
-                    Progress.all_progress.remove(self)
-                    if len(Progress.all_progress) == 0:
-                        print ''
-                except Exception:
-                    pass
-                
-    def __init__(self, problem_size, message='Progress:', incrementing=True):
-        assert isinstance(problem_size, int)
-        assert problem_size > 0
-        assert isinstance(message, str)
-        assert isinstance(incrementing, bool)
-
-        self._start_time = time.time()
-        self._stop_time = None
-        self._message = message
-        self._incrementing = incrementing
-        self._problem_size = problem_size
-        if self._incrementing:
-            self._step = 0
-        else:
-            self._step = self._problem_size
-        self._children = list()
-        self._last_update = self._start_time
-        Progress.all_progress.append(self)
-
-
 class Cloud:
-    def make_mask(self):
-        mask_shape = (1+self.max_x-self.min_x, 1+self.max_y-self.min_y)
-        self.mask = np.zeros(mask_shape, dtype=int)
-        for point in self.points:
-            self.mask[point[0]-self.min_x][point[1]-self.min_y] = 1 
 
-    def to_ImageHDU(self):
+    def as_ImageHDU(self):
         hdr = fits.Header()
         hdr['MIN_X'] = (self.min_x, 'Lower-left x-coordinate of mask in backprojection')
         hdr['MAX_X'] = (self.max_x, 'Upper-right x-coordinate of mask in backprojection')
         hdr['MIN_Y'] = (self.min_y, 'Lower-left y-coordinate of mask in backprojection')
         hdr['MAX_Y'] = (self.max_y, 'Upper-right y-coordinate of mask in backprojection')
-        self.make_mask()
         hdr['AREA'] = (self.mask.size, 'Area covered by this mask')
         hdr['LITPIX'] = (len(self.points), 'Number of nonzero pixels in the mask')
-        hdr['DIAG'] = (math.hypot(*self.mask.shape), 'Diagonal size of mask')
+        hdr['DIAG'] = (np.hypot(*self.mask.shape), 'Diagonal size of mask')
         return fits.ImageHDU(data=self.mask, header=hdr)
     
     def __init__(self, list_of_points):
@@ -168,51 +101,34 @@ class Cloud:
                 if int(point[0])!=point[0] or int(point[1])!=point[1]:
                     raise TypeError('Points must contain integer coordinates'+repr(point))
             return True
-        assert proper_formatting(self.points)
+        #assert proper_formatting(self.points) #TODO
 
         self.points.sort(key=operator.itemgetter(0))    
         self.min_x, self.max_x = self.points[0][0], self.points[-1][0]
         self.points.sort(key=operator.itemgetter(1))    
         self.min_y, self.max_y = self.points[0][1], self.points[-1][1]
-        
+        self.mask = np.zeros((1+self.max_x-self.min_x, 1+self.max_y-self.min_y), dtype=np.int_)
+        for point in self.points:
+            self.mask[point[0]-self.min_x][point[1]-self.min_y] = 1 
+
 #-----------------------------------------------------------------------------------------
-# Post-Processing Functions
+# File Handling
 #-----------------------------------------------------------------------------------------
-skip = 1 #Number of HDUs that do not correspond to filaments in output files
-#default_key = 'LITPIX' 
-
-source_data = dict()
-source_data['COLDENS'] = fits.open('D:/LAB_corrected_coldens.fits', mode='readonly', memmap=True, save_backup=False, checksum=True)[0].data
-source_data['INTGALFA'] = fits.open('D:/SC_241.66_28.675.best.fits', mode='readonly', memmap=True, save_backup=False, checksum=True)[0].data.sum(axis=0)
-
-def identity(): 
-    def I(args):
-        return args
-    return I 
-post_processing = collections.defaultdict(identity)
-post_processing['COLDENS'] = np.log10
-post_processing['INTGALFA'] = np.log10
-
-methods = dict()
-methods['_AVG']=np.nanmean
-methods['_MED']=scipy.stats.nanmedian
-methods['_TOT']=np.nansum
-
-def handle(fileobj):
+def handle(fileobj, mode='readonly'):
 
     if isinstance(fileobj, str):
         assert fileobj.endswith('.fits')
-        assert '_xyt' in fileobj
+        assert rht.xyt_suffix in fileobj
         assert SUFFIX in fileobj
         print 'Accessing: '+fileobj+' '
-        hdu_list = fits.open(fileobj, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
+        hdu_list = fits.open(fileobj, mode=mode, memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
         filaments_filename = fileobj
 
     elif isinstance(fileobj, fits.HDUList):
         hdu_list = fileobj
         filaments_filename = hdu_list.filename()
         assert filaments_filename.endswith('.fits')
-        assert '_xyt' in filaments_filename
+        assert rht.xyt_suffix in filaments_filename
         assert SUFFIX in filaments_filename
 
     else:
@@ -222,15 +138,18 @@ def handle(fileobj):
 
     return filaments_filename, hdu_list
 
-def filament_properties(filaments_filename, key, external_source=None, show=True):
+#-----------------------------------------------------------------------------------------
+# Post-Processing Functions
+#-----------------------------------------------------------------------------------------
+def filament_properties(filaments_filename, key, external_source=None):
     #Computes the average value of the dataset indicated by key or external_source for each filament
     #Saves the value to the associated header entry of each filament
     assert isinstance(key, str)
-    filaments_filename, hdu_list = handle(filaments_filename)
+    filaments_filename, hdu_list = handle(filaments_filename, mode='update')
 
     if key in hdu_list[skip].header:
         print key+' keyword found in filament header...'
-        if 'y' not in raw_input('Overwrite? [n]/y'):
+        if 'y' not in raw_input('Overwrite? ([no]/yes):  '):
             return hdu_list, key
 
     if external_source is not None:
@@ -249,24 +168,18 @@ def filament_properties(filaments_filename, key, external_source=None, show=True
     hdu_list.flush()
     return hdu_list, key
 
-import matplotlib
-#matplotlib.rcParams['backend'] = 'TkAgg'
-matplotlib.rcParams['image.origin'] = 'lower'
-#matplotlib.rcParams['figure.figsize'] = 6,6
-#matplotlib.rcParams['figure.dpi'] = 200
-from matplotlib import pyplot as plt
-from matplotlib import gridspec
+def plot(filaments_filename, key=None, out_name=None, show=True):
+    if not show and out_name is None:
+        'Unable to plot data without showing or saving it'
+        return 
 
-def plot(out_name, filaments_filename, key=None):
-        
-    assert isinstance(out_name, str)
     filaments_filename, hdu_list = handle(filaments_filename)
-    figure_args = {'figsize':(10,7.5), 'facecolor':'white','dpi':200}
+    figure_args = {'figsize':(8,7), 'facecolor':'white','dpi':250}
 
     if key is None:
         display = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
-        #for i, hdu in enumerate(hdu_list[skip:]):
-        for hdu in hdu_list[skip:]:
+        for i, hdu in enumerate(hdu_list[skip:]):
+            #for hdu in hdu_list[skip:]:
             hdr = hdu.header            
             display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = i
         fig = plt.figure(**figure_args)
@@ -280,43 +193,32 @@ def plot(out_name, filaments_filename, key=None):
         for hdu in hdu_list[skip:]:
             hdr = hdu.header
             for suffix in methods.iterkeys():            
-                displays[key+suffix][hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = post_processing[key](hdr[key+suffix]) #hdr[key+suffix] 
+                displays[key+suffix][hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = hdr[key+suffix] #post_processing[key](hdr[key+suffix]) # 
     else:
         print 'Unable to plot data using the given key: '+str(key)
         return
     
     if key is not None:
         #fig, (ax1, ax2) = plt.subplots(1,2,sharey='row', **figure_args)
-
         plt.figure(**figure_args)
         Nplots = len(methods)
-        gs = gridspec.GridSpec(Nplots, 10)
+        r=4
+        gs = gridspec.GridSpec(Nplots*r, 5*r)
         suffixes = methods.keys()
         for i in range(Nplots):
             title = key+suffixes[i]
-            ax1 = plt.subplot(gs[i,0:-1]) #plt.subplot2grid((1,10), (0,0), colspan=9)
-            ax2 = plt.subplot(gs[i,-1]) #plt.subplot2grid((1,10), (0,1), colspan=1)
-            ax2.hist(map(operator.itemgetter(title), map(operator.attrgetter('header'), hdu_list[skip:])), bins=50, orientation='horizontal', histtype='stepfilled')
-            plt.colorbar(ax1.imshow(displays[title].T, cmap = "RdBu"), ax=ax1, fraction=0.10)
-            plt.title(title)
-        '''
-        ax3 = plt.subplot(gs[1,0:-1]) #plt.subplot2grid((1,10), (0,0), colspan=9)
-        ax4 = plt.subplot(gs[1,-1]) #plt.subplot2grid((1,10), (0,1), colspan=1)
-        ax5 = plt.subplot(gs[2,0:-1]) #plt.subplot2grid((1,10), (0,0), colspan=9)
-        ax6 = plt.subplot(gs[2,-1]) #plt.subplot2grid((1,10), (0,1), colspan=1)
-
-        for suffix, a1, a2 in zip(methods.iterkeys(), [ax1, ax3, ax5], [ax2, ax4, ax6]):
-            #data_only = map(operator.itemgetter(key), map(operator.attrgetter('header'), hdu_list[skip:]))
-            a2.hist(map(operator.itemgetter(key+suffix), map(operator.attrgetter('header'), hdu_list[skip:])), bins=50, orientation='horizontal', histtype='stepfilled')
-        
-            #aspect=displays[].shape[1]/(0.15*displays[].shape[0])
-            plt.colorbar(a1.imshow(displays[key+suffix].T, cmap = "RdBu"), ax=a1, fraction=0.10) #, aspect=aspect) 
-        '''
+            ax1 = plt.subplot(gs[1+r*i:r*(i+1),0:-3]) #plt.subplot2grid((1,10), (0,0), colspan=9)
+            ax2 = plt.subplot(gs[1+r*i:r*(i+1)-1,-1:-2]) #plt.subplot2grid((1,10), (0,1), colspan=1)
+            raw_data = post_processing[key](map(operator.itemgetter(title), map(operator.attrgetter('header'), hdu_list[skip:])))
+            ax2.hist(raw_data, bins=50, orientation='horizontal', histtype='stepfilled', range=(18, 25))
+            plt.colorbar(ax1.imshow(post_processing[key](displays[title].T), cmap = "YlOrRd"), ax=ax2, fraction=0.10)
+            plt.title(title, fontsize=8)
     else:
         key = 'Filaments'
     
-    plt.suptitle(key+' from '+filaments_filename, fontsize=18)
-    plt.savefig(out_name, dpi=500, format='png')
+    plt.suptitle(key+' from '+filaments_filename, fontsize=12)
+    if out_name is not None and isinstance(out_name, str):
+        plt.savefig(out_name, dpi=500, format='png')
     if show:
         plt.show()
     plt.clf() 
@@ -329,7 +231,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
 
     #Read in RHT Output from filename_xyt??.fits
     assert xyt_filename.endswith('.fits')
-    assert '_xyt' in xyt_filename
+    assert rht.xyt_suffix in xyt_filename
     assert SUFFIX not in xyt_filename
     print 'Accessing: '+xyt_filename+' '
     hdu_list = fits.open(xyt_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
@@ -361,7 +263,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         del delimiter
         problem_size = len(raw_points)
         message='Step '+str(bin+1)+'/'+str(BINS)+': (N='+str(problem_size)+')'
-        progress_bar = Progress(problem_size, message=message, incrementing=True)
+        #progress_bar = Progress(problem_size, message=message, incrementing=True)
 
         point_dict = dict([x[::-1] for x in enumerate(raw_points)])
         set_dict = collections.defaultdict(list)
@@ -379,7 +281,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         G = nx.from_dict_of_lists(set_dict) #Undirected graph made using set_dict as an adjacency list
         del set_dict 
         
-        progress_bar = Progress(problem_size, message=message, incrementing=False)
+        #progress_bar = Progress(problem_size, message=message, incrementing=False)
         sources = range(problem_size)
         flags = np.ones((problem_size), dtype=np.int_)
         while len(sources) > 0: 
@@ -413,7 +315,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         mask = np.nonzero(histogram >= int(frac*wlen))[0]
         del histogram
 
-        progress_bar = Progress(problem_size, message=message, incrementing=False)
+        #progress_bar = Progress(problem_size, message=message, incrementing=False)
         mask_dict = dict([x[::-1] for x in enumerate(mask)])
         out_clouds = collections.defaultdict(list)
 
@@ -429,7 +331,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
 
         while len(out_clouds) > 0:
             #unprocessed.append(out_clouds.popitem()[1])
-            list_of_HDUs.append(Cloud(out_clouds.popitem()[1]).to_ImageHDU())
+            list_of_HDUs.append(Cloud(out_clouds.popitem()[1]).as_ImageHDU())
 
         #rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
         '''
@@ -458,7 +360,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
     #Convert lists of two-integer tuples into ImageHDUs
     list_of_HDUs.sort(key=lambda h: h.header['DIAG'], reverse=True)
     output_hdulist = fits.HDUList(list_of_HDUs)
-    #output_hdulist = fits.HDUList(map(Cloud.to_ImageHDU, map(Cloud, unprocessed)))
+    #output_hdulist = fits.HDUList(map(Cloud.as_ImageHDU, map(Cloud, unprocessed)))
     #del unprocessed
 
     #Output HDUList to File
@@ -470,7 +372,6 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
     print 'Results successfully output to '+output_filename
     return output_filename
 
-        
 #-----------------------------------------------------------------------------------------
 # Command Line Mode
 #-----------------------------------------------------------------------------------------
@@ -478,20 +379,22 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
 if __name__ == "__main__":
 
     #Interpret Arguments
-    parser = ArgumentParser(description="Run Fiber Isolation on 1+ _xyt FITS files", usage='%(prog)s [options] file(s)', formatter_class=ArgumentDefaultsHelpFormatter)
+    parser = ArgumentParser(description="Run Fiber Isolation on 1 or more RHT output (.fits) files", usage='%(prog)s [options] file(s)', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('files', nargs='+', help="FITS file(s)")
     if len(sys.argv) == 1: # no arguments given, so add -h to get help msg
         sys.argv.append('-h')
     args = parser.parse_args()
 
     #Do Processing
-    for xyt_filename in args.files: # loop over input files
-        if SUFFIX not in xyt_filename:
-            show(isolate_all(xyt_filename))
+    for filename in args.files: # loop over input files
+        if SUFFIX not in filename:
+            #This is hopefully an XYT RHT output file...
+            plot(isolate_all(filename))
             #isolate_all(xyt_filename)
         else:
-            show(*filament_average(xyt_filename, key='COLDENS'))
-            #show(xyt_filename)
+            #This would hopefully be a formerly run _filament.fits file...
+            #plot(filename)
+            plot(*filament_properties(filename, key='COLDENS'), out_name=filename[:-5]+'_COLDENS.png')
 
 
 
