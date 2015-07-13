@@ -19,6 +19,7 @@ import itertools
 import operator
 import collections
 import networkx as nx
+import datetime
 
 import numpy as np
 import rht
@@ -40,6 +41,18 @@ class Progress:
     all_progress = list()
     TEXTWIDTH = 79
     length = int(0.55 * TEXTWIDTH)
+
+    def append(self, child):
+        if not isinstance(child, Progress):
+            raise ValueError('You can only append some Progress to existing Progress!')
+        elif self == child:
+            raise ValueError('Progress cannot be appended to itself!')
+        elif child in self._children:
+            
+        else:
+            self._children.append(child)
+
+
 
     def update(self, progress=None):
         return progress
@@ -103,6 +116,7 @@ class Progress:
             self._step = 0
         else:
             self._step = self._problem_size
+        self._children = list()
         self._last_update = self._start_time
         Progress.all_progress.append(self)
 
@@ -180,9 +194,9 @@ post_processing['COLDENS'] = np.log10
 post_processing['INTGALFA'] = np.log10
 
 methods = dict()
-methods['AVG_']=np.nanmean
-methods['MED_']=scipy.stats.nanmedian
-methods['TOT_']=np.nansum
+methods['_AVG']=np.nanmean
+methods['_MED']=scipy.stats.nanmedian
+methods['_TOT']=np.nansum
 
 def handle(fileobj):
 
@@ -208,7 +222,7 @@ def handle(fileobj):
 
     return filaments_filename, hdu_list
 
-def filament_properties(filaments_filename, key, external_source=None):
+def filament_properties(filaments_filename, key, external_source=None, show=True):
     #Computes the average value of the dataset indicated by key or external_source for each filament
     #Saves the value to the associated header entry of each filament
     assert isinstance(key, str)
@@ -227,10 +241,10 @@ def filament_properties(filaments_filename, key, external_source=None):
         raise KeyError('No source to average over for key: '+key)
 
     for i, hdu in enumerate(hdu_list[skip:]):
-        for prefix, func in methods.iteritems():        
+        for suffix, func in methods.iteritems():        
             hdr = hdu.header
-            hdr[prefix+key] = func(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][np.nonzero(hdu.data.T)])
-        hdr[key] = key
+            hdr[key+suffix] = func(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][np.nonzero(hdu.data.T)])
+        hdr[key] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     hdu_list.flush()
     return hdu_list, key
@@ -247,41 +261,64 @@ def plot(out_name, filaments_filename, key=None):
         
     assert isinstance(out_name, str)
     filaments_filename, hdu_list = handle(filaments_filename)
-    display = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
+    figure_args = {'figsize':(10,7.5), 'facecolor':'white','dpi':200}
 
     if key is None:
-        for i, hdu in enumerate(hdu_list[skip:]):
-            hdr = hdu.header            
-            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = i
-    elif isinstance(key, str):
+        display = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
+        #for i, hdu in enumerate(hdu_list[skip:]):
         for hdu in hdu_list[skip:]:
             hdr = hdu.header            
-            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = hdr[key] #post_processing[key](hdr[key])
+            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = i
+        fig = plt.figure(**figure_args)
+        ax1 = fig.add_axes([0.0,0.0,1.0,1.0])
+        ax1.imshow(display.T)
+
+    elif isinstance(key, str) and key in hdu_list[skip].header:
+        displays = dict()
+        for suffix in methods.iterkeys():
+            displays[key+suffix] = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
+        for hdu in hdu_list[skip:]:
+            hdr = hdu.header
+            for suffix in methods.iterkeys():            
+                displays[key+suffix][hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = post_processing[key](hdr[key+suffix]) #hdr[key+suffix] 
     else:
         print 'Unable to plot data using the given key: '+str(key)
         return
-
-    figure_args = {'figsize':(11,8.5), 'facecolor':'white','dpi':200}
-        
+    
     if key is not None:
         #fig, (ax1, ax2) = plt.subplots(1,2,sharey='row', **figure_args)
 
         plt.figure(**figure_args)
-        gs = gridspec.GridSpec(1, 10)
-        ax1 = plt.subplot(gs[0:-1]) #plt.subplot2grid((1,10), (0,0), colspan=9)
-        ax2 = plt.subplot(gs[-1]) #plt.subplot2grid((1,10), (0,1), colspan=1)
+        Nplots = len(methods)
+        gs = gridspec.GridSpec(Nplots, 10)
+        suffixes = methods.keys()
+        for i in range(Nplots):
+            title = key+suffixes[i]
+            ax1 = plt.subplot(gs[i,0:-1]) #plt.subplot2grid((1,10), (0,0), colspan=9)
+            ax2 = plt.subplot(gs[i,-1]) #plt.subplot2grid((1,10), (0,1), colspan=1)
+            ax2.hist(map(operator.itemgetter(title), map(operator.attrgetter('header'), hdu_list[skip:])), bins=50, orientation='horizontal', histtype='stepfilled')
+            plt.colorbar(ax1.imshow(displays[title].T, cmap = "RdBu"), ax=ax1, fraction=0.10)
+            plt.title(title)
+        '''
+        ax3 = plt.subplot(gs[1,0:-1]) #plt.subplot2grid((1,10), (0,0), colspan=9)
+        ax4 = plt.subplot(gs[1,-1]) #plt.subplot2grid((1,10), (0,1), colspan=1)
+        ax5 = plt.subplot(gs[2,0:-1]) #plt.subplot2grid((1,10), (0,0), colspan=9)
+        ax6 = plt.subplot(gs[2,-1]) #plt.subplot2grid((1,10), (0,1), colspan=1)
 
-        #data_only = map(operator.itemgetter(key), map(operator.attrgetter('header'), hdu_list[skip:]))
-        ax2.hist(map(operator.itemgetter(key), map(operator.attrgetter('header'), hdu_list[skip:])), bins=100, orientation='horizontal', histtype='stepfilled')#,log=(post_processing[key]==np.log10))
+        for suffix, a1, a2 in zip(methods.iterkeys(), [ax1, ax3, ax5], [ax2, ax4, ax6]):
+            #data_only = map(operator.itemgetter(key), map(operator.attrgetter('header'), hdu_list[skip:]))
+            a2.hist(map(operator.itemgetter(key+suffix), map(operator.attrgetter('header'), hdu_list[skip:])), bins=50, orientation='horizontal', histtype='stepfilled')
+        
+            #aspect=displays[].shape[1]/(0.15*displays[].shape[0])
+            plt.colorbar(a1.imshow(displays[key+suffix].T, cmap = "RdBu"), ax=a1, fraction=0.10) #, aspect=aspect) 
+        '''
     else:
-        fig = plt.figure(**figure_args)
-        ax1 = fig.add_axes([0.0,0.0,1.0,1.0])
-
-    #aspect=display.shape[1]/(0.15*display.shape[0])
-    plt.colorbar(ax1.imshow(display.T, cmap = "RdBu"), ax=ax1, fraction=0.10) #, aspect=aspect)
+        key = 'Filaments'
+    
     plt.suptitle(key+' from '+filaments_filename, fontsize=18)
     plt.savefig(out_name, dpi=500, format='png')
-    plt.show()
+    if show:
+        plt.show()
     plt.clf() 
 
 #-----------------------------------------------------------------------------------------
@@ -356,7 +393,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
                     for member in nx.descendants(G, source):
                         flags[member] = False
                         point_dict[raw_points[member]] = source
-                        #TODO Remove members from G if that would speed up subsequent calls?
+                        G.remove_node(member) #TODO Remove members from G if that would speed up subsequent calls?
                 except nx.NetworkXError:
                     #Assume we hit an isolated pixel (never made it into G) and move on
                     pass
