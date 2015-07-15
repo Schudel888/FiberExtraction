@@ -17,6 +17,7 @@ import networkx as nx
 import datetime
 import scipy.stats
 import numpy as np
+import math
 
 import matplotlib
 #matplotlib.rcParams['backend'] = 'TkAgg'
@@ -27,6 +28,7 @@ from matplotlib import pyplot as plt
 from matplotlib import gridspec
 
 import rht #Latest version @https://github.com/seclark/RHT
+import config
 
 #-----------------------------------------------------------------------------------------
 # Initialization: Program Settings
@@ -36,41 +38,30 @@ SUFFIX = '_filaments.'
 
 skip = 1 #Number of HDUs that do not correspond to filaments in output files
 
-source_data = dict()
-try:
-    source_data['COLDENS'] = fits.open('D:/LAB_corrected_coldens.fits', mode='readonly', memmap=True, save_backup=False, checksum=True)[0].data
-except Exception:
-    print "WARNING: Unable to find source data for COLDENS Keyword at D:/LAB_corrected_coldens.fits" #pass #TODO Bad Source Data Location
-
-#source_data['INTGALFA'] = fits.open('D:/SC_241.66_28.675.best.fits', mode='readonly', memmap=True, save_backup=False, checksum=True)[0].data.sum(axis=0)
-
-def identity(): 
-    def I(args):
-        return args
-    return I 
-post_processing = collections.defaultdict(identity)
-post_processing['COLDENS'] = np.log10
-
-#Known methods that can produce a single value from a masked area of source data
-methods = dict()
-methods['_AVG']=np.nanmean
-methods['_MED']=scipy.stats.nanmedian
-methods['_TOT']=np.nansum
-
 #-----------------------------------------------------------------------------------------
 # Initialization: Class Definitions
 #-----------------------------------------------------------------------------------------
 class Cloud:
+    functions = {
+        'MIN_X': (operator.attrgetter('min_x'), 'Lower-left x-coordinate of mask in backprojection'),
+        'MAX_X': (operator.attrgetter('max_x'), 'Upper-right x-coordinate of mask in backprojection'),
+        'MIN_Y': (operator.attrgetter('min_y'), 'Lower-left y-coordinate of mask in backprojection'),
+        'MAX_Y': (operator.attrgetter('max_y'), 'Upper-right y-coordinate of mask in backprojection'),
+        'AREA': (config.chained([operator.attrgetter('mask'), operator.attrgetter('size')]), 'Area covered by this mask'),
+        'LITPIX': (config.chained([operator.attrgetter('points'), len]), 'Number of nonzero pixels in the mask'),
+        'DIAG': (config.chained([operator.attrgetter('mask'), config.bridge(math.hypot, operator.attrgetter('shape'))]), 'Diagonal size of mask')
+    }
+    '''
+    @staticmethod
+    def from_ImageHDU(imageHDU):
+        assert isinstance(fits.ImageHDU)
+        assert all([key in imageHDU.header])
+    '''
 
     def as_ImageHDU(self):
         hdr = fits.Header()
-        hdr['MIN_X'] = (self.min_x, 'Lower-left x-coordinate of mask in backprojection')
-        hdr['MAX_X'] = (self.max_x, 'Upper-right x-coordinate of mask in backprojection')
-        hdr['MIN_Y'] = (self.min_y, 'Lower-left y-coordinate of mask in backprojection')
-        hdr['MAX_Y'] = (self.max_y, 'Upper-right y-coordinate of mask in backprojection')
-        hdr['AREA'] = (self.mask.size, 'Area covered by this mask')
-        hdr['LITPIX'] = (len(self.points), 'Number of nonzero pixels in the mask')
-        hdr['DIAG'] = (np.hypot(*self.mask.shape), 'Diagonal size of mask')
+        for k,v in Cloud.functions.iteritems():
+            hdr[k] = (v[0](self), v[1])
         return fits.ImageHDU(data=self.mask, header=hdr)
     
     def __init__(self, list_of_points):
@@ -78,7 +69,11 @@ class Cloud:
         if isinstance(list_of_points, Cloud):
             self = list_of_points
             return 
-        
+            '''
+            elif isinstance(list_of_points, fits.ImageHDU):
+                self = from_ImageHDU(list_of_points)
+                return
+            '''
         elif isinstance(list_of_points, tuple):
             if len(list_of_points) > 2:
                 self.points = list(set(list_of_points))
@@ -87,6 +82,8 @@ class Cloud:
         
         elif isinstance(list_of_points, set):
             self.points = list(list_of_points)
+        else:
+            self.points = list_of_points #TODO 
 
         def proper_formatting(given):
             if not isinstance(given, list):
@@ -101,7 +98,7 @@ class Cloud:
                 if int(point[0])!=point[0] or int(point[1])!=point[1]:
                     raise TypeError('Points must contain integer coordinates'+repr(point))
             return True
-        #assert proper_formatting(self.points) #TODO
+        assert proper_formatting(self.points) #TODO
 
         self.points.sort(key=operator.itemgetter(0))    
         self.min_x, self.max_x = self.points[0][0], self.points[-1][0]
@@ -121,7 +118,7 @@ def handle(fileobj, mode='readonly'):
         assert rht.xyt_suffix in fileobj
         assert SUFFIX in fileobj
         print 'Accessing: '+fileobj+' '
-        hdu_list = fits.open(fileobj, mode=mode, memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
+        hdu_list = config.default_open(fileobj, mode)
         filaments_filename = fileobj
 
     elif isinstance(fileobj, fits.HDUList):
@@ -154,13 +151,15 @@ def filament_properties(filaments_filename, key, external_source=None):
 
     if external_source is not None:
         correlation_data = external_source
-    elif key in source_data:
-        correlation_data = source_data[key]
+    elif key in config.source_data:
+        correlation_data = config.source_data[key]
     else:
         raise KeyError('No source to average over for key: '+key)
 
     for i, hdu in enumerate(hdu_list[skip:]):
-        for suffix, func in methods.iteritems():        
+        #for suffix, func in config.methods.iteritems():
+        for suffix in config.applicable_methods[key]:        
+            func = config.methods[suffix]
             hdr = hdu.header
             hdr[key+suffix] = func(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][np.nonzero(hdu.data.T)])
         hdr[key] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -168,53 +167,57 @@ def filament_properties(filaments_filename, key, external_source=None):
     hdu_list.flush()
     return hdu_list, key
 
-def plot(filaments_filename, key=None, out_name=None, show=True):
+def plot(filaments_filename, key=None, out_name=None, show=True, cut=(lambda x: True)):
     if not show and out_name is None:
         'Unable to plot data without showing or saving it'
         return 
 
-    filaments_filename, hdu_list = handle(filaments_filename)
-    figure_args = {'figsize':(8,7), 'facecolor':'white','dpi':250}
 
+    filaments_filename, hdu_list = handle(filaments_filename)
+    backproj = hdu_list.pop(0)
+    #TODO make sure to pop skip hdus!s
+    hdu_list = filter(cut, hdu_list) #TODO
+
+    figure_args = {'figsize':(8,7), 'facecolor':'white','dpi':250}
+    
     if key is None:
-        display = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
-        for i, hdu in enumerate(hdu_list[skip:]):
-            #for hdu in hdu_list[skip:]:
+        display = np.zeros((backproj.header['NAXIS1'], backproj.header['NAXIS2']))
+        for i, hdu in enumerate(hdu_list):
             hdr = hdu.header            
             display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = i
         fig = plt.figure(**figure_args)
         ax1 = fig.add_axes([0.0,0.0,1.0,1.0])
         ax1.imshow(display.T)
+        key = 'Filaments'
 
     elif isinstance(key, str) and key in hdu_list[skip].header:
         displays = dict()
-        for suffix in methods.iterkeys():
-            displays[key+suffix] = np.zeros((hdu_list[0].header['NAXIS1'], hdu_list[0].header['NAXIS2']))
-        for hdu in hdu_list[skip:]:
+        #for suffix in config.methods.iterkeys():
+        for suffix in config.applicable_methods[key]:        
+            displays[key+suffix] = np.zeros((backproj.header['NAXIS1'], backproj.header['NAXIS2']))
+        for hdu in hdu_list:
             hdr = hdu.header
-            for suffix in methods.iterkeys():            
-                displays[key+suffix][hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = hdr[key+suffix] #post_processing[key](hdr[key+suffix]) # 
+            #for suffix in config.methods.iterkeys(): 
+            for suffix in config.applicable_methods[key]:           
+                displays[key+suffix][hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = hdr[key+suffix] #config.post_processing[key](hdr[key+suffix]) # 
+        #fig, (ax1, ax2) = plt.subplots(1,2,sharey='row', **figure_args)
+        fig = plt.figure(**figure_args)
+        Nplots = len(config.applicable_methods[key])
+        r=4
+        gs = gridspec.GridSpec(Nplots*r, 5*r)
+        suffixes = config.applicable_methods[key]
+        for i in range(Nplots):
+            title = key+suffixes[i]
+            ax1 = plt.subplot(gs[1+r*i:r*(i+1),0:-4]) #plt.subplot2grid((1,10), (0,0), colspan=9)
+            ax2 = plt.subplot(gs[1+r*i:r*(i+1)-1,-1:-2]) #plt.subplot2grid((1,10), (0,1), colspan=1)
+            raw_data = config.post_processing[key](map(operator.itemgetter(title), map(operator.attrgetter('header'), hdu_list)))
+            ax2.hist(raw_data, bins=50, orientation='horizontal', histtype='stepfilled') #range=(18, 25))
+            plt.colorbar(ax1.imshow(config.post_processing[key](displays[title].T), cmap = "YlOrRd"), ax=ax2, fraction=0.10)
+            plt.title(title, fontsize=8)
     else:
         print 'Unable to plot data using the given key: '+str(key)
         return
-    
-    if key is not None:
-        #fig, (ax1, ax2) = plt.subplots(1,2,sharey='row', **figure_args)
-        plt.figure(**figure_args)
-        Nplots = len(methods)
-        r=4
-        gs = gridspec.GridSpec(Nplots*r, 5*r)
-        suffixes = methods.keys()
-        for i in range(Nplots):
-            title = key+suffixes[i]
-            ax1 = plt.subplot(gs[1+r*i:r*(i+1),0:-3]) #plt.subplot2grid((1,10), (0,0), colspan=9)
-            ax2 = plt.subplot(gs[1+r*i:r*(i+1)-1,-1:-2]) #plt.subplot2grid((1,10), (0,1), colspan=1)
-            raw_data = post_processing[key](map(operator.itemgetter(title), map(operator.attrgetter('header'), hdu_list[skip:])))
-            ax2.hist(raw_data, bins=50, orientation='horizontal', histtype='stepfilled', range=(18, 25))
-            plt.colorbar(ax1.imshow(post_processing[key](displays[title].T), cmap = "YlOrRd"), ax=ax2, fraction=0.10)
-            plt.title(title, fontsize=8)
-    else:
-        key = 'Filaments'
+        
     
     plt.suptitle(key+' from '+filaments_filename, fontsize=12)
     if out_name is not None and isinstance(out_name, str):
@@ -234,7 +237,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
     assert rht.xyt_suffix in xyt_filename
     assert SUFFIX not in xyt_filename
     print 'Accessing: '+xyt_filename+' '
-    hdu_list = fits.open(xyt_filename, mode='readonly', memmap=True, save_backup=False, checksum=True) #Allows for reading in very large files!
+    hdu_list = config.default_open(xyt_filename)
     ntheta = hdu_list[0].header['NTHETA']
     wlen = hdu_list[0].header['WLEN']
     frac = hdu_list[0].header['FRAC']
@@ -270,7 +273,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
 
         for coord in raw_points:
             #rht.update_progress(0.3*(i/problem_size), message=message)
-            progress_bar.update()
+            #progress_bar.update()
             for rel_coord in search_pattern:
                 try:
                     j = point_dict[rel_add(coord, rel_coord)]
@@ -290,7 +293,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
                 continue
             else:
                 #rht.update_progress(0.3+0.3*(1.0-len(sources)/problem_size), message=message)
-                progress_bar.update(len(sources))
+                #progress_bar.update(len(sources))
                 try:
                     for member in nx.descendants(G, source):
                         flags[member] = False
@@ -324,7 +327,7 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
             try:
                 #Keying into mask_dict is the only operation that ought to throw an exception 
                 out_clouds[mask_dict[temp[1]]].append(temp[0])
-                progress_bar.update(len(point_dict))
+                #progress_bar.update(len(point_dict))
                 #rht.update_progress(0.6+0.399*(1.0-len(point_dict)/problem_size), message=message)
             except Exception:
                 continue
@@ -353,19 +356,16 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
         plt.close()
         plt.ioff()
     '''
-    #unprocessed.sort(key=len, reverse=True)
-    #if DEBUG:
-    #print map(len, unprocessed)
-
     #Convert lists of two-integer tuples into ImageHDUs
-    list_of_HDUs.sort(key=lambda h: h.header['DIAG'], reverse=True)
-    output_hdulist = fits.HDUList(list_of_HDUs)
+    #unprocessed.sort(key=len, reverse=True)
     #output_hdulist = fits.HDUList(map(Cloud.as_ImageHDU, map(Cloud, unprocessed)))
     #del unprocessed
+    list_of_HDUs.sort(key=config.chained([operator.attrgetter('header'), operator.itemgetter('DIAG')]), reverse=True) #lambda h: h.header['DIAG'], reverse=True)
+    output_hdulist = fits.HDUList(list_of_HDUs)
+    del list_of_HDUs
 
     #Output HDUList to File
     output_filename = string.join(string.rsplit(xyt_filename, '.', 1), SUFFIX)
-    #TODO output_hdulist.insert(0, fits.ImageHDU(data=backprojection_with_sets, header=fits.Header()))
     output_hdulist.insert(0, hdu_list[0].copy()) #TODO Introduces Errors in Reading FITS File 
     output_hdulist.writeto(output_filename, output_verify='silentfix', clobber=True, checksum=True)
 
@@ -394,9 +394,10 @@ if __name__ == "__main__":
         else:
             #This would hopefully be a formerly run _filament.fits file...
             #plot(filename)
-            plot(*filament_properties(filename, key='COLDENS'), out_name=filename[:-5]+'_COLDENS.png')
-
-
+            #plot(*filament_properties(filename, key='COLDENS'), out_name=filename[:-5]+'_COLDENS.png')
+            #plot(*filament_properties(filename, key='GALFA0'), out_name=filename[:-5]+'_GALFA0.png')
+            #plot(*filament_properties(filename, key='B'))
+            plot(filename, key='GALFA0', out_name=filename[:-5]+'_GALFA0_50.png', cut=lambda h: h.header['B_MIN'] > 50.0)
 
     #Cleanup and Exit
     #exit()
