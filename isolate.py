@@ -14,7 +14,6 @@ import string
 import operator
 import collections
 import networkx as nx
-import datetime
 import scipy.stats
 import numpy as np
 import math
@@ -37,106 +36,6 @@ import config
 SUFFIX = '_filaments.'
 
 skip = 1 #Number of HDUs that do not correspond to filaments in output files
-
-#-----------------------------------------------------------------------------------------
-# Initialization: Class Definitions
-#-----------------------------------------------------------------------------------------
-class Cloud:
-    functions = {
-        'MIN_X': (operator.attrgetter('min_x'), 'Lower-left x-coordinate of mask in backprojection'),
-        'MAX_X': (operator.attrgetter('max_x'), 'Upper-right x-coordinate of mask in backprojection'),
-        'MIN_Y': (operator.attrgetter('min_y'), 'Lower-left y-coordinate of mask in backprojection'),
-        'MAX_Y': (operator.attrgetter('max_y'), 'Upper-right y-coordinate of mask in backprojection'),
-        'AREA': (config.chained([operator.attrgetter('mask'), operator.attrgetter('size')]), 'Area covered by this mask'),
-        'LITPIX': (config.chained([operator.attrgetter('points'), len]), 'Number of nonzero pixels in the mask'),
-        'DIAG': (config.chained([operator.attrgetter('mask'), config.bridge(math.hypot, operator.attrgetter('shape'))]), 'Diagonal size of filament, corner-to-corner major-axis'),
-        'OFF_DIAG': (lambda self: 4*len(self.points)/(np.pi*math.hypot(*self.mask.shape)), 'Off-diagonal size of filament, computed minor-axis')
-    }
- 
-    '''
-    @staticmethod
-    def nonzero_data_from_HDU(hdu):
-        #assert all([key in imageHDU.header])
-        if isinstance(hdu, fits.ImageHDU) or isinstance(hdu, fits.BinTableHDU):
-            return np.nonzero(Cloud(hdu).mask)
-        else:
-            raise ValueError('Cannot Create Cloud from anything but Image and BinTable HDUs')
-    '''
-    def as_ImageHDU(self):
-        hdr = fits.Header()
-        for k,v in Cloud.functions.iteritems():
-            hdr[k] = (v[0](self), v[1])
-        return fits.ImageHDU(data=self.mask, header=hdr)
-
-    def as_BinTableHDU(self):
-        hdr = fits.Header()
-        for k,v in Cloud.functions.iteritems():
-            hdr[k] = (v[0](self), v[1])
-
-        #column = fits.Column(name=None, format=None, unit=None, null=None, bscale=None, bzero=None, disp=None, start=None, dim=None, array=None, ascii=None)
-        xy = np.nonzero(self.mask)
-        xs = fits.Column(name='xs', format='1I', array=xy[0])
-        ys = fits.Column(name='ys', format='1I', array=xy[1])
-        #ntheta = hthets.shape[1]
-        #Hthets = fits.Column(name='hthets', format=str(int(ntheta))+'E', array=hthets)
-        cols = fits.ColDefs([xs, ys])
-
-        return fits.BinTableHDU(data=cols, header=hdr)
-
-    def as_HDU(self, sparse=False):
-        '''
-        hdr = fits.Header()
-        for k,v in Cloud.functions.iteritems():
-            hdr[k] = (v[0](self), v[1])
-        '''
-        if sparse:
-            return self.as_BinTableHDU()
-        else:
-            return self.as_ImageHDU()
-
-    def __init__(self, list_of_points):
-        #Expects a python list of two-integer tuples, corresponding the the x,y coordinate of the points original location in the backprojection 
-        if isinstance(list_of_points, Cloud):
-            self = list_of_points
-            return 
-            '''
-            elif isinstance(list_of_points, fits.ImageHDU):
-                self = from_ImageHDU(list_of_points)
-                return
-            '''
-        elif isinstance(list_of_points, tuple):
-            if len(list_of_points) > 2:
-                self.points = list(set(list_of_points))
-            elif len(list_of_points) == 2:
-                self.points = [list_of_points]
-        
-        elif isinstance(list_of_points, set):
-            self.points = list(list_of_points)
-        else:
-            self.points = list_of_points #TODO 
-
-        def proper_formatting(given):
-            if not isinstance(given, list):
-                raise TypeError('Cloud cannot be constructed from the given datatype: '+str(type(given)))
-            if len(given) is 0:
-                raise ValueError('Cloud must contain at least one point')
-            for point in given:
-                if not isinstance(point, tuple):
-                    raise TypeError('All points in a cloud must be coordinate tuples')
-                if len(point) != 2:
-                    raise ValueError('Points must be tuples of length 2')
-                if int(point[0])!=point[0] or int(point[1])!=point[1]:
-                    raise TypeError('Points must contain integer coordinates'+repr(point))
-            return True
-        assert proper_formatting(self.points) #TODO
-
-        self.points.sort(key=operator.itemgetter(0))    
-        self.min_x, self.max_x = self.points[0][0], self.points[-1][0]
-        self.points.sort(key=operator.itemgetter(1))    
-        self.min_y, self.max_y = self.points[0][1], self.points[-1][1]
-        self.mask = np.zeros((1+self.max_x-self.min_x, 1+self.max_y-self.min_y), dtype=np.int_)
-        for point in self.points:
-            self.mask[point[0]-self.min_x][point[1]-self.min_y] = 1 
 
 #-----------------------------------------------------------------------------------------
 # File Handling
@@ -192,7 +91,6 @@ def filament_properties(filaments_filename, key, external_source=None):
             func = config.methods[suffix]
             hdr = hdu.header
             hdr[key+suffix] = func(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][np.nonzero(hdu.data.T)])
-        hdr[key] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     hdu_list.flush()
     return hdu_list, key
@@ -260,7 +158,7 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=(lambda x: 
 # Bulk Fiber Isolation Functions
 #-----------------------------------------------------------------------------------------
 
-def isolate_all(xyt_filename, BINS=6, generateHDU=Cloud.as_ImageHDU): #Cloud.as_BinTableHDU):
+def isolate_all(xyt_filename, BINS=6, generateHDU=config.Cloud.as_ImageHDU): #config.Cloud.as_BinTableHDU):
 
     #Read in RHT Output from filename_xyt??.fits
     assert xyt_filename.endswith('.fits')
@@ -360,13 +258,13 @@ def isolate_all(xyt_filename, BINS=6, generateHDU=Cloud.as_ImageHDU): #Cloud.as_
         while len(out_clouds) > 0:
             #cloud = out_clouds.popitem()[1]
             #unprocessed.append(out_clouds.popitem()[1])
-            list_of_HDUs.append(Cloud(out_clouds.popitem()[1]).as_HDU()) #TODO Incorporate theta_dict
-            #list_of_HDUs.append(generateHDU(Cloud(out_clouds.popitem()[1])))
+            list_of_HDUs.append(config.Cloud(out_clouds.popitem()[1]).as_HDU()) #TODO Incorporate theta_dict
+            #list_of_HDUs.append(generateHDU(config.Cloud(out_clouds.popitem()[1])))
         #rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
         
     #Convert lists of two-integer tuples into ImageHDUs
     #unprocessed.sort(key=len, reverse=True)
-    #output_hdulist = fits.HDUList(map(Cloud.as_ImageHDU, map(Cloud, unprocessed)))
+    #output_hdulist = fits.HDUList(map(config.Cloud.as_ImageHDU, map(config.Cloud, unprocessed)))
     #del unprocessed
     list_of_HDUs.sort(key=config.chained([operator.attrgetter('header'), operator.itemgetter('DIAG')]), reverse=True) #lambda h: h.header['DIAG'], reverse=True)
     output_hdulist = fits.HDUList(list_of_HDUs)
@@ -405,8 +303,9 @@ if __name__ == "__main__":
             #plot(*filament_properties(filename, key='COLDENS'), out_name=filename[:-5]+'_COLDENS.png')
             #plot(*filament_properties(filename, key='GALFA0'), out_name=filename[:-5]+'_GALFA0.png')
             #plot(*filament_properties(filename, key='B'))
-            plot(filename, key='GALFA0', out_name=filename[:-5]+'_GALFA0_50.png', cut=lambda h: h.header['B_MIN'] > 50.0)
-
+            #plot(filename, key='GALFA0', out_name=filename[:-5]+'_GALFA0_50.png', cut=lambda h: h.header['B_MIN'] > 50.0)
+            plot(*filament_properties(filename, key=''))
+            
     #Cleanup and Exit
     #exit()
 
