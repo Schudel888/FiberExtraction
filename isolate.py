@@ -49,21 +49,51 @@ class Cloud:
         'MAX_Y': (operator.attrgetter('max_y'), 'Upper-right y-coordinate of mask in backprojection'),
         'AREA': (config.chained([operator.attrgetter('mask'), operator.attrgetter('size')]), 'Area covered by this mask'),
         'LITPIX': (config.chained([operator.attrgetter('points'), len]), 'Number of nonzero pixels in the mask'),
-        'DIAG': (config.chained([operator.attrgetter('mask'), config.bridge(math.hypot, operator.attrgetter('shape'))]), 'Diagonal size of mask')
+        'DIAG': (config.chained([operator.attrgetter('mask'), config.bridge(math.hypot, operator.attrgetter('shape'))]), 'Diagonal size of filament, corner-to-corner major-axis'),
+        'OFF_DIAG': (lambda self: 4*len(self.points)/(np.pi*math.hypot(*self.mask.shape)), 'Off-diagonal size of filament, computed minor-axis')
     }
+ 
     '''
     @staticmethod
-    def from_ImageHDU(imageHDU):
-        assert isinstance(fits.ImageHDU)
-        assert all([key in imageHDU.header])
+    def nonzero_data_from_HDU(hdu):
+        #assert all([key in imageHDU.header])
+        if isinstance(hdu, fits.ImageHDU) or isinstance(hdu, fits.BinTableHDU):
+            return np.nonzero(Cloud(hdu).mask)
+        else:
+            raise ValueError('Cannot Create Cloud from anything but Image and BinTable HDUs')
     '''
-
     def as_ImageHDU(self):
         hdr = fits.Header()
         for k,v in Cloud.functions.iteritems():
             hdr[k] = (v[0](self), v[1])
         return fits.ImageHDU(data=self.mask, header=hdr)
-    
+
+    def as_BinTableHDU(self):
+        hdr = fits.Header()
+        for k,v in Cloud.functions.iteritems():
+            hdr[k] = (v[0](self), v[1])
+
+        #column = fits.Column(name=None, format=None, unit=None, null=None, bscale=None, bzero=None, disp=None, start=None, dim=None, array=None, ascii=None)
+        xy = np.nonzero(self.mask)
+        xs = fits.Column(name='xs', format='1I', array=xy[0])
+        ys = fits.Column(name='ys', format='1I', array=xy[1])
+        #ntheta = hthets.shape[1]
+        #Hthets = fits.Column(name='hthets', format=str(int(ntheta))+'E', array=hthets)
+        cols = fits.ColDefs([xs, ys])
+
+        return fits.BinTableHDU(data=cols, header=hdr)
+
+    def as_HDU(self, sparse=False):
+        '''
+        hdr = fits.Header()
+        for k,v in Cloud.functions.iteritems():
+            hdr[k] = (v[0](self), v[1])
+        '''
+        if sparse:
+            return self.as_BinTableHDU()
+        else:
+            return self.as_ImageHDU()
+
     def __init__(self, list_of_points):
         #Expects a python list of two-integer tuples, corresponding the the x,y coordinate of the points original location in the backprojection 
         if isinstance(list_of_points, Cloud):
@@ -230,7 +260,7 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=(lambda x: 
 # Bulk Fiber Isolation Functions
 #-----------------------------------------------------------------------------------------
 
-def isolate_all(xyt_filename, BINS=6, DEBUG = True):
+def isolate_all(xyt_filename, BINS=6, generateHDU=Cloud.as_ImageHDU): #Cloud.as_BinTableHDU):
 
     #Read in RHT Output from filename_xyt??.fits
     assert xyt_filename.endswith('.fits')
@@ -248,14 +278,12 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
     Hj = hdu_list[1].data['hj'] 
 
     #Compute TheteRHT for all pixels given, then bin by theta
-    C = np.multiply(np.asarray(map(rht.theta_rht,hdu_list[1].data['hthets'])), BINS/np.pi).astype(np.int_)
+    B = map(rht.theta_rht,hdu_list[1].data['hthets']) #List of theta_rht values
+    C = np.multiply(np.asarray(B), BINS/np.pi).astype(np.int_)
     
     def rel_add((a,b), (c,d)):
         return a+c,b+d
-    '''
-    if not DEBUG:
-        plt.ion()
-    '''
+    
     #Set Assignment
     #unprocessed = list()
     list_of_HDUs = list() 
@@ -270,10 +298,12 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
 
         point_dict = dict([x[::-1] for x in enumerate(raw_points)])
         set_dict = collections.defaultdict(list)
+        theta_dict = dict()
 
         for coord in raw_points:
             #rht.update_progress(0.3*(i/problem_size), message=message)
             #progress_bar.update()
+            theta_dict[coord] = B[point_dict[coord]]
             for rel_coord in search_pattern:
                 try:
                     j = point_dict[rel_add(coord, rel_coord)]
@@ -310,11 +340,6 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
             #finished_map[pt] = point_dict[pt]
 
         histogram = np.bincount(map(point_dict.get, raw_points))
-        '''
-        if DEBUG:
-            plt.plot(histogram)
-            plt.show()
-        '''
         mask = np.nonzero(histogram >= int(frac*wlen))[0]
         del histogram
 
@@ -333,29 +358,12 @@ def isolate_all(xyt_filename, BINS=6, DEBUG = True):
                 continue
 
         while len(out_clouds) > 0:
+            #cloud = out_clouds.popitem()[1]
             #unprocessed.append(out_clouds.popitem()[1])
-            list_of_HDUs.append(Cloud(out_clouds.popitem()[1]).as_ImageHDU())
-
+            list_of_HDUs.append(Cloud(out_clouds.popitem()[1]).as_HDU()) #TODO Incorporate theta_dict
+            #list_of_HDUs.append(generateHDU(Cloud(out_clouds.popitem()[1])))
         #rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
-        '''
-        try:
-            plt.imshow(finished_map)#+1)
-            if not DEBUG:
-                plt.cla()
-                plt.clf()
-                plt.draw()
-            else:
-                plt.show()
-        except Exception:
-            print 'Failed to Display Theta Slice'
-        '''
-    '''    
-    if not DEBUG:
-        plt.cla()
-        plt.clf()
-        plt.close()
-        plt.ioff()
-    '''
+        
     #Convert lists of two-integer tuples into ImageHDUs
     #unprocessed.sort(key=len, reverse=True)
     #output_hdulist = fits.HDUList(map(Cloud.as_ImageHDU, map(Cloud, unprocessed)))

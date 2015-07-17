@@ -641,20 +641,34 @@ def theta_rht(theta_array, original=True):
         xs = theta_array*np.cos(2.0*thetas)    
         
         # Clark, Peek, & Putman: Equation (7)
-        rough_angle = 0.5*np.arctan2(np.sum(ys), np.sum(xs))
-        
-        # Clark, Peek, & Putman: Equation (8)
-        angle = np.mod(rough_angle, np.pi) #np.pi-math.fmod(rough_angle+np.pi, np.pi)
-        
+        rough_angle = 0.5*np.arctan2(np.sum(ys), np.sum(xs)) #"angle in radians, in the range [-pi, pi]"
+        #Desired output in range [0, pi]
+        if math.fabs(rough_angle) == math.pi:
+            angle = 0.0
+        elif math.pi > rough_angle >= 0.0: 
+            angle = rough_angle 
+        elif 0.0 > rough_angle > -1.0*math.pi:
+            angle = math.pi+rough_angle 
+        else:
+            raise ValueError('Bad input to theta_rht()')
     else:
         thetas = np.linspace(0.0, 2*np.pi, len(theta_array), endpoint=False, retstep=False)
         ys = theta_array*np.sin(thetas)
         xs = theta_array*np.cos(thetas)    
-        angle = np.arctan2(np.sum(ys), np.sum(xs)) 
-        
+        rough_angle = np.arctan2(np.sum(ys), np.sum(xs))  #"angle in radians, in the range [-pi, pi]"
+        #Desired output in range [0, 2*pi]
+        if math.fabs(rough_angle) == math.pi:
+            angle = 0.0
+        elif math.pi > rough_angle >= 0.0: 
+            angle = rough_angle 
+        elif 0.0 > rough_angle > -1.0*math.pi:
+            angle = 2*math.pi+rough_angle 
+        else:
+            raise ValueError('Bad input to theta_rht()') 
+
     # Returns the <theta>_rht as described by Clark, Peek, & Putman for a given array.
     return angle
-
+    
 def buffershape(ntheta, filesize=FILECAP):
     # Shape of maximum sized array that can fit into a single buffer file. 
     ntheta = int(ntheta)
