@@ -67,13 +67,13 @@ def handle(fileobj, mode='readonly'):
 #-----------------------------------------------------------------------------------------
 # Post-Processing Functions
 #-----------------------------------------------------------------------------------------
-def filament_properties(filaments_filename, key, external_source=None):
+def update_key(filaments_filename, key, external_source=None, force=False):
     #Computes the average value of the dataset indicated by key or external_source for each filament
     #Saves the value to the associated header entry of each filament
     assert isinstance(key, str)
     filaments_filename, hdu_list = handle(filaments_filename, mode='update')
 
-    if key in hdu_list[skip].header:
+    if not force and key in hdu_list[skip].header:
         print key+' keyword found in filament header...'
         if 'y' not in raw_input('Overwrite? ([no]/yes):  '):
             return hdu_list, key
@@ -83,23 +83,52 @@ def filament_properties(filaments_filename, key, external_source=None):
     elif key in config.source_data:
         correlation_data = config.source_data[key]
     else:
-        raise KeyError('No source to average over for key: '+key)
+        raise KeyError('No source given for key: '+key)
 
-    for i, hdu in enumerate(hdu_list[skip:]):
-        #for suffix, func in config.methods.iteritems():
-        for suffix in config.applicable_methods[key]:        
-            func = config.methods[suffix]
+    #for i, hdu in enumerate(hdu_list[skip:]):
+    for hdu in hdu_list[skip:]:
+        if correlation_data is not None:
+            #Assumes correlation_data can be indexed into using ndarray notation [LowerLeft to UpperRight+1]
+            #Assumes config.Cloud.nonzero_data_from_HDU will return the pixel coords offset properly for the above masked region
+            #Assumes func can take this weird ndarray view as input and return a scalar value
+            for suffix in config.applicable_methods[key]:        
+                func = config.methods[suffix]
+                hdr = hdu.header
+                hdr[key+suffix] = func(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=True)])
+        else:
+            #Assumes all func require a config.Cloud object to work
+            tempCloud = config.Cloud(hdu)
             hdr = hdu.header
-            hdr[key+suffix] = func(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][np.nonzero(hdu.data.T)])
+            for suffix in config.applicable_methods[key]:        
+                func = config.methods[suffix]
+                hdr[key+suffix] = func(tempCloud)
 
     hdu_list.flush()
     return hdu_list, key
 
-def plot(filaments_filename, key=None, out_name=None, show=True, cut=(lambda x: True)):
+def update_all_keys(filaments_filename):
+    #Updates the properties corresponding to all known sources
+    filaments_filename, hdu_list = handle(filaments_filename, mode='update')
+
+    exceptions = ''
+    for key in config.sources.iterkeys():
+        try:
+            update_key(hdu_list, key, force=True)
+        except Exception as e:
+            print e
+            if len(exceptions) == 0:
+                exceptions += 'except '
+            exceptions += key+', '
+
+    if len(exceptions) > 0 and string.count(exceptions, ',') > 0:
+        exceptions = string.join(string.rsplit(exceptions, ',', 1), ' and')
+    print 'All properties '+exceptions+'are now up to date in '+filaments_filename
+    return hdu_list #TODO what should this return? should I close the hdu_list?
+
+def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.passive_constant(True)):
     if not show and out_name is None:
         'Unable to plot data without showing or saving it'
         return 
-
 
     filaments_filename, hdu_list = handle(filaments_filename)
     backproj = hdu_list.pop(0)
@@ -107,40 +136,43 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=(lambda x: 
     hdu_list = filter(cut, hdu_list) #TODO
 
     figure_args = {'figsize':(8,7), 'facecolor':'white','dpi':250}
-    
+    fig = plt.figure(**figure_args)
+
     if key is None:
         display = np.zeros((backproj.header['NAXIS1'], backproj.header['NAXIS2']))
+        N = len(hdu_list)
         for i, hdu in enumerate(hdu_list):
             hdr = hdu.header            
-            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = i
-        fig = plt.figure(**figure_args)
-        ax1 = fig.add_axes([0.0,0.0,1.0,1.0])
+            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=False)] = N-i
+        ax1 = fig.add_axes([0.05,0.05,0.95,0.95])
         ax1.imshow(display.T)
         key = 'Filaments'
 
     elif isinstance(key, str) and key in hdu_list[skip].header:
         displays = dict()
-        #for suffix in config.methods.iterkeys():
-        for suffix in config.applicable_methods[key]:        
+        datasets = dict()
+        suffixes = config.applicable_methods[key]
+
+        for suffix in suffixes:        
             displays[key+suffix] = np.zeros((backproj.header['NAXIS1'], backproj.header['NAXIS2']))
-        for hdu in hdu_list:
+            datasets[key+suffix] = config.post_processing[key]( map(operator.itemgetter(key+suffix), map(operator.attrgetter('header'), hdu_list)) ) #TODO watch out for python list handling
+      
+        #for hdu in hdu_list:
+        for i, hdu in enumerate(hdu_list):      
             hdr = hdu.header
-            #for suffix in config.methods.iterkeys(): 
-            for suffix in config.applicable_methods[key]:           
-                displays[key+suffix][hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][np.nonzero(hdu.data)] = hdr[key+suffix] #config.post_processing[key](hdr[key+suffix]) # 
-        #fig, (ax1, ax2) = plt.subplots(1,2,sharey='row', **figure_args)
-        fig = plt.figure(**figure_args)
-        Nplots = len(config.applicable_methods[key])
+            for suffix in suffixes:           
+                displays[key+suffix][hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=False)] = datasets[key+suffix][i] #config.post_processing[key](hdr[key+suffix])  
+        
+        Nplots = len(suffixes)
         r=4
         gs = gridspec.GridSpec(Nplots*r, 5*r)
-        suffixes = config.applicable_methods[key]
+        
         for i in range(Nplots):
             title = key+suffixes[i]
             ax1 = plt.subplot(gs[1+r*i:r*(i+1),0:-4]) #plt.subplot2grid((1,10), (0,0), colspan=9)
             ax2 = plt.subplot(gs[1+r*i:r*(i+1)-1,-1:-2]) #plt.subplot2grid((1,10), (0,1), colspan=1)
-            raw_data = config.post_processing[key](map(operator.itemgetter(title), map(operator.attrgetter('header'), hdu_list)))
-            ax2.hist(raw_data, bins=50, orientation='horizontal', histtype='stepfilled') #range=(18, 25))
-            plt.colorbar(ax1.imshow(config.post_processing[key](displays[title].T), cmap = "YlOrRd"), ax=ax2, fraction=0.10)
+            ax2.hist(datasets[title], bins=50, orientation='horizontal', histtype='stepfilled') #range=(18, 25))
+            plt.colorbar(ax1.imshow(displays[title].T, cmap = "YlOrRd"), ax=ax2, fraction=0.10)
             plt.title(title, fontsize=8)
     else:
         print 'Unable to plot data using the given key: '+str(key)
@@ -300,12 +332,13 @@ if __name__ == "__main__":
         else:
             #This would hopefully be a formerly run _filament.fits file...
             #plot(filename)
-            #plot(*filament_properties(filename, key='COLDENS'), out_name=filename[:-5]+'_COLDENS.png')
-            #plot(*filament_properties(filename, key='GALFA0'), out_name=filename[:-5]+'_GALFA0.png')
-            #plot(*filament_properties(filename, key='B'))
+            #plot(*update_key(filename, key='COLDENS'), out_name=filename[:-5]+'_COLDENS.png')
+            #plot(*update_key(filename, key='GALFA0'), out_name=filename[:-5]+'_GALFA0.png')
+            #plot(*update_key(filename, key='B'))
             #plot(filename, key='GALFA0', out_name=filename[:-5]+'_GALFA0_50.png', cut=lambda h: h.header['B_MIN'] > 50.0)
-            plot(*filament_properties(filename, key=''))
-            
+            #plot(*update_key(filename, key=''))
+            update_all_keys(filename)
+
     #Cleanup and Exit
     #exit()
 

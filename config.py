@@ -16,8 +16,12 @@ import datetime
 #-----------------------------------------------------------------------------------------
 identity = lambda x:x
 
-def constant(function):
-    #Given constant(f)(x) --> returns f() #Ignores x
+def passive_constant(value):
+    #Given active_constant(value)(x) --> returns value #Ignores x
+    return lambda x: value
+
+def active_constant(function):
+    #Given active_constant(f)(x) --> returns f() #Ignores x
     return lambda x: function()
 
 def chained(functions):
@@ -55,7 +59,7 @@ class Cloud:
     }
  
     @staticmethod
-    def nonzero_data_from_HDU(hdu, transpose=True):
+    def nonzero_data_from_HDU(hdu, transpose=False):
         '''
         try:
             #TODO
@@ -63,12 +67,12 @@ class Cloud:
         except Exception:
             sparse = None
         '''
-        if isinstance(hdu, BinTableHDU):
+        if isinstance(hdu, fits.BinTableHDU):
             if transpose:
                 return (hdu.data['xs'], hdu.data['ys'])
             else:
                 return (hdu.data['ys'], hdu.data['xs'])
-        elif isinstance(hdu, ImageHDU):
+        elif isinstance(hdu, fits.ImageHDU):
             if transpose:
                 return np.nonzero(hdu.data.T)
             else:
@@ -121,7 +125,10 @@ class Cloud:
         elif isinstance(list_of_points, set):
             self.points = list(list_of_points)
         else:
-            self.points = list_of_points #TODO 
+            try:
+                self.points = zip(*nonzero_data_from_HDU(hdu, transpose=False))
+            except Exception:
+                self.points = list_of_points #TODO 
 
         def proper_formatting(given):
             if not isinstance(given, list):
@@ -156,7 +163,7 @@ methods = {
     '_TOT':np.nansum,    
     '_MIN':np.nanmin,
     '_MAX':np.nanmax,
-    '':chained([constant(datetime.datetime.now), operator.methodcaller('strftime', "%Y-%m-%d %H:%M:%S")])
+    '':chained([active_constant(datetime.datetime.now), operator.methodcaller('strftime', "%Y-%m-%d %H:%M:%S")])
 }
 
 sources = {
@@ -179,7 +186,7 @@ sources = {
         ['_MAX', '_MIN']
     ),
     '': (
-        np.zeros((1150, 5600)),
+        None,
         identity,
         identity,
         Cloud.functions.iterkeys()
@@ -188,7 +195,7 @@ sources = {
 
 source_data = dict()
 applicable_methods = dict()
-post_processing = collections.defaultdict(identity)
+post_processing = dict() #collections.defaultdict(identity)
 for k,v in sources.iteritems():
     try:
         source_data[k] = v[1](v[0])
@@ -198,9 +205,8 @@ for k,v in sources.iteritems():
         print 'WARNING: Unable to find source data for '+str(k)+' keyword using '+str(v[0])+' as an initial input.. (Modify config.py for better results!)'
         print repr(e)
 
-
+'''
 possible_keys = list()
-possible_keys.extend( Cloud.functions.iterkeys() ) 
 for key in sources.iterkeys():
     for suffix in sources[key][3]:
         possible_keys.append(key+suffix) 
@@ -218,4 +224,8 @@ def is_complete(cloud_HDU, fix=True):
             print 'Unable to fix Cloud in config.is_complete'
             #TODO
             return False
+'''
+
+
+
 
