@@ -100,7 +100,7 @@ def update_key(filaments_filename, key, external_source=None, force=False):
             tempCloud = config.Cloud(hdu)
             hdr = hdu.header
             for suffix in config.applicable_methods[key]:        
-                func = config.methods[suffix]
+                func = config.Cloud.functions[suffix][0]
                 hdr[key+suffix] = func(tempCloud)
 
     hdu_list.flush()
@@ -117,8 +117,9 @@ def update_all_keys(filaments_filename):
         except Exception as e:
             print e
             if len(exceptions) == 0:
-                exceptions += 'except '
-            exceptions += key+', '
+                exceptions += 'except '+key
+            else:
+                exceptions += ', '+key
 
     if len(exceptions) > 0 and string.count(exceptions, ',') > 0:
         exceptions = string.join(string.rsplit(exceptions, ',', 1), ' and')
@@ -336,8 +337,8 @@ if __name__ == "__main__":
             #plot(*update_key(filename, key='GALFA0'), out_name=filename[:-5]+'_GALFA0.png')
             #plot(*update_key(filename, key='B'))
             #plot(filename, key='GALFA0', out_name=filename[:-5]+'_GALFA0_50.png', cut=lambda h: h.header['B_MIN'] > 50.0)
-            #plot(*update_key(filename, key=''))
-            update_all_keys(filename)
+            plot(*update_key(filename, key='', force=True))
+            #update_all_keys(filename)
 
     #Cleanup and Exit
     #exit()

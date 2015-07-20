@@ -55,7 +55,7 @@ class Cloud:
         'AREA': (chained([operator.attrgetter('mask'), operator.attrgetter('size')]), 'Area covered by this mask'),
         'LITPIX': (chained([operator.attrgetter('points'), len]), 'Number of nonzero pixels in the mask'),
         'DIAG': (chained([operator.attrgetter('mask'), bridged(math.hypot, operator.attrgetter('shape'))]), 'Diagonal size of filament, corner-to-corner major-axis'),
-        'OFF_DIAG': (lambda self: 4*len(self.points)/(np.pi*math.hypot(*self.mask.shape)), 'Off-diagonal size of filament, computed minor-axis')
+        'OFF_DIAG': (lambda x: 4.0*float(len(x.points))/(np.pi*math.hypot(*x.mask.shape)), 'Off-diagonal size of filament, computed minor-axis')
     }
  
     @staticmethod
@@ -77,6 +77,8 @@ class Cloud:
                 return np.nonzero(hdu.data.T)
             else:
                 return np.nonzero(hdu.data)
+        else:
+            raise ValueError('Your hdu could not be resolved to a known type in nonzero_data_from_HDU()')
 
     def as_ImageHDU(self):
         hdr = fits.Header()
@@ -114,21 +116,18 @@ class Cloud:
     def __init__(self, list_of_points):
         #Expects a python list of two-integer tuples, corresponding the the x,y coordinate of the points original location in the backprojection 
         if isinstance(list_of_points, Cloud):
-            self = list_of_points
-            return
+            self.points = list_of_points
+        elif isinstance(list_of_points, fits.BinTableHDU) or isinstance(list_of_points, fits.ImageHDU):
+            self.points = zip(*Cloud.nonzero_data_from_HDU(list_of_points, transpose=False))
         elif isinstance(list_of_points, tuple):
             if len(list_of_points) > 2:
                 self.points = list(set(list_of_points))
             elif len(list_of_points) == 2:
                 self.points = [list_of_points]
-        
         elif isinstance(list_of_points, set):
             self.points = list(list_of_points)
         else:
-            try:
-                self.points = zip(*nonzero_data_from_HDU(hdu, transpose=False))
-            except Exception:
-                self.points = list_of_points #TODO 
+            self.points = list_of_points #TODO 
 
         def proper_formatting(given):
             if not isinstance(given, list):
@@ -171,13 +170,13 @@ sources = {
         'D:/LAB_corrected_coldens.fits', 
         chained([default_open, operator.itemgetter(0), operator.attrgetter('data')]), 
         np.log10,
-        ['_AVG', '_MED', '_TOT','']
+        ['_AVG', '_MED', '_TOT']
     ),
     'GALFA0': (
         'D:/SC_241.66_28.675.best.fits', 
         chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(np.s_[16:25]), lambda x: np.nansum(x, axis=0), lambda x: np.multiply(x, 1.823E18)]),
         np.log10,
-        ['_AVG', '_MED', '_TOT','']
+        ['_AVG', '_MED', '_TOT']
     ), 
     'B': (
         'D:/SC_241_2d_bs.npy',
@@ -189,7 +188,7 @@ sources = {
         None,
         identity,
         identity,
-        Cloud.functions.iterkeys()
+        list(Cloud.functions.iterkeys())
     )
 }#operator.methodcaller('sum', axis=0)
 
@@ -200,6 +199,7 @@ for k,v in sources.iteritems():
     try:
         source_data[k] = v[1](v[0])
         post_processing[k] = v[2]
+        v[3].append('')
         applicable_methods[k] = v[3]
     except Exception as e:
         print 'WARNING: Unable to find source data for '+str(k)+' keyword using '+str(v[0])+' as an initial input.. (Modify config.py for better results!)'
