@@ -14,14 +14,12 @@ import string
 import operator
 import collections
 import networkx as nx
-import scipy.stats
 import numpy as np
-import math
 
 import matplotlib
-#matplotlib.rcParams['backend'] = 'TkAgg'
+matplotlib.rcParams['backend'] = 'TkAgg'
 matplotlib.rcParams['image.origin'] = 'lower'
-#matplotlib.rcParams['figure.dpi'] = 200
+matplotlib.rcParams['figure.dpi'] = 250
 from matplotlib import pyplot as plt
 from matplotlib import gridspec
 
@@ -45,6 +43,7 @@ def is_xyt_filename(fileobj):
         assert fileobj.endswith('.fits')
         assert rht.xyt_suffix in fileobj
         assert SUFFIX not in fileobj
+        #TODO
         return True
     except Exception:
         return False
@@ -55,6 +54,7 @@ def is_filament_filename(fileobj):
         assert fileobj.endswith('.fits')
         assert rht.xyt_suffix in fileobj
         assert SUFFIX in fileobj
+        #TODO
         return True
     except Exception:
         return False
@@ -66,6 +66,7 @@ def is_filament_hdu_list(fileobj):
         assert filaments_filename.endswith('.fits')
         assert rht.xyt_suffix in filaments_filename
         assert SUFFIX in filaments_filename
+        #TODO
         return True
     except Exception:
         return False
@@ -73,23 +74,30 @@ def is_filament_hdu_list(fileobj):
 #-----------------------------------------------------------------------------------------
 # Post-Processing Functions
 #-----------------------------------------------------------------------------------------
-def update_key(filaments_filename, key, external_source=None, force=False):
-    #Computes the average value of the dataset indicated by key or external_source for each filament
+def update_key(filaments_filename, key, correlation_data=None, force=False):
+    #Computes the value of the dataset indicated by key (or correlation_data) for each filament
+    #Uses the functions indicated by key from config
     #Saves the value to the associated header entry of each filament
     assert isinstance(key, str)
     
-    def do_update(hdu_list):
+    def do_update(hdu_list, key, correlation_data, force):
+        print 'Updating key:', key, 'in', hdu_list.filename()
+
         if not force and key in hdu_list[skip].header:
             print key+' keyword found in filament header...'
             if 'y' not in raw_input('Overwrite? ([no]/yes):  '):
                 return hdu_list, key
 
-        if external_source is not None:
-            correlation_data = external_source
-        elif key in config.source_data:
-            correlation_data = config.source_data[key]
-        else:
-            raise KeyError('No source given for key: '+key)
+        #correlation_data can be None if and only if the functions you will call expect Cloud objects
+        #else, it must correspond to a source_data and applicable_methods entry
+        if correlation_data is None: 
+            if key in config.source_data:
+                correlation_data = config.source_data[key]
+            else:
+                raise KeyError('No source_data for key: '+key+' in config.source_data')
+            
+        if key not in config.applicable_methods:
+            raise KeyError('No applicable_methods for key: '+key+' in config.applicable_methods')
 
         #for i, hdu in enumerate(hdu_list[skip:]):
         for hdu in hdu_list[skip:]:
@@ -101,39 +109,48 @@ def update_key(filaments_filename, key, external_source=None, force=False):
                 for suffix in config.applicable_methods[key]:        
                     func = config.methods[suffix]
                     hdr[key+suffix] = func(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=True)])
+                hdr[key] = config.timestamp()
             else:
                 #Assumes all func require a config.Cloud object to work
                 tempCloud = config.Cloud(hdu)
                 for suffix in config.applicable_methods[key]:        
                     func = config.Cloud.functions[suffix][0]
                     hdr[key+suffix] = func(tempCloud)
-            hdr[key] = config.timestamp()
-
+            
         hdu_list.flush()
 
     if is_filament_filename(filaments_filename):
-        with config.default_open(filaments_filename, mode='update') as hdu_list:
-            do_update(hdu_list)
+        #with config.default_open(filaments_filename, mode='update') as hdu_list:
+        hdu_list = config.default_open(filaments_filename, mode='update')
+        do_update(hdu_list, key, correlation_data, force)
+        hdu_list.close()
         return filaments_filename
 
     elif is_filament_hdu_list(filaments_filename):
         hdu_list = filaments_filename
         assert hdu_list.fileinfo(0)['filemode'] == 'update'
-        do_update(hdu_list)
+        do_update(hdu_list, key, correlation_data, force)
         return hdu_list, key
 
     else:
         print 'Unknown input encountered in update_key()...'
         return None
 
-def update_all_keys(filaments_filename):
+def update_all_keys(filaments_filename, force=False):
     #Updates the properties corresponding to all known sources
 
-    def do_update_all(hdu_list)
+    def do_update_all(hdu_list, force):
+        print 'Updating all keys in', hdu_list.filename()
+
+        if not force:
+            print 'This is a long operation that involves updating ALL keys from config.sources'
+            if 'y' not in raw_input('Continue? ([no]/yes):  '):
+                return 'Aborted: update_all_keys()'
+
         exceptions = ''
         for key in config.sources.iterkeys():
             try:
-                update_key(hdu_list, key, force=True) #TODO Don't need to do anything with the output?
+                update_key(hdu_list, key, force=force) #TODO Don't need to do anything with the output?
             except Exception as e:
                 print e
                 if len(exceptions) == 0:
@@ -142,17 +159,18 @@ def update_all_keys(filaments_filename):
                     exceptions += ', '+key
         if len(exceptions) > 0 and string.count(exceptions, ',') > 0:
             exceptions = string.join(string.rsplit(exceptions, ',', 1), ' and')
-        return 'All properties '+exceptions+'are now up to date in '+filaments_filename
+        return 'All properties '+exceptions+'are now up to date in '+hdu_list.filename()
         
     if is_filament_filename(filaments_filename):
-        with config.default_open(filaments_filename, mode='update') as hdu_list:
-            print do_update_all(hdu_list)
+        #with config.default_open(filaments_filename, mode='update') as hdu_list:
+        hdu_list = config.default_open(filaments_filename, mode='update')
+        print do_update_all(hdu_list, force)
         return filaments_filename
 
     elif is_filament_hdu_list(filaments_filename):
         hdu_list = filaments_filename
         assert hdu_list.fileinfo(0)['filemode'] == 'update'
-        print do_update_all(hdu_list)
+        print do_update_all(hdu_list, force)
         return hdu_list, key
 
     else:
@@ -165,11 +183,13 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
         'Unable to plot data without showing or saving it in isolate.plot()'
         return None
 
-    def do_plot(hdu_list):
+    def do_plot(hdu_list, key, out_name, show, cut):
         try:
+            filaments_filename = hdu_list.filename()
+            print 'Plotting key:', key, 'in', filaments_filename
             backproj = hdu_list.pop(0)
             #TODO make sure to pop skip hdus!s
-            hdu_list = filter(cut, hdu_list) #TODO
+            hdu_list = filter(cut, hdu_list) #TODO TURNS AN HDULIST INTO A LIST ~_~
 
             if key is None:
                 figure_args = {'figsize':(8,6), 'facecolor':'white','dpi':250}
@@ -184,7 +204,7 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
                 ax1.imshow(display.T)
                 key = 'Filaments'
 
-            elif isinstance(key, str) and key in hdu_list[skip].header:
+            elif isinstance(key, str) and key in hdu_list[0].header: #skip].header:
                 displays = dict()
                 datasets = dict()
                 titles = [key+suffix for suffix in config.applicable_methods[key]] 
@@ -224,7 +244,7 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
                 print 'Unable to plot data using the given key: '+str(key)
                 return
         
-            plt.suptitle(key+' from '+hdu_list.filename(), fontsize=12)
+            plt.suptitle(key+' from '+filaments_filename, fontsize=12)
             if out_name is not None and isinstance(out_name, str):
                 plt.savefig(out_name, dpi=500, format='png')
             if show:
@@ -239,14 +259,15 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
             plt.close()
 
     if is_filament_filename(filaments_filename):
-        with config.default_open(filaments_filename, mode='update') as hdu_list:
-            do_plot(hdu_list)
+        #with config.default_open(filaments_filename, mode='readonly') as hdu_list:
+        hdu_list = config.default_open(filaments_filename, mode='readonly')
+        do_plot(hdu_list, key=key, out_name=out_name, show=show, cut=cut)
+        hdu_list.close()
         return filaments_filename
 
     elif is_filament_hdu_list(filaments_filename):
         hdu_list = filaments_filename
-        assert hdu_list.fileinfo(0)['filemode'] == 'update'
-        do_plot(hdu_list)
+        do_plot(hdu_list, key=key, out_name=out_name, show=show, cut=cut)
         return hdu_list, key
 
     else:
@@ -274,9 +295,6 @@ def isolate_all(xyt_filename, BINS=6, generateHDU=config.Cloud.as_ImageHDU): #co
     B = map(rht.theta_rht,hdu_list[1].data['hthets']) #List of theta_rht values
     C = np.multiply(np.asarray(B), BINS/np.pi).astype(np.int_)
     
-    def rel_add((a,b), (c,d)):
-        return a+c,b+d
-    
     #Set Assignment
     #unprocessed = list()
     list_of_HDUs = list() 
@@ -299,7 +317,7 @@ def isolate_all(xyt_filename, BINS=6, generateHDU=config.Cloud.as_ImageHDU): #co
             theta_dict[coord] = B[point_dict[coord]]
             for rel_coord in search_pattern:
                 try:
-                    j = point_dict[rel_add(coord, rel_coord)]
+                    j = point_dict[config.rel_add(coord, rel_coord)]
                     set_dict[point_dict[coord]].append(j)
                 except Exception:
                     continue

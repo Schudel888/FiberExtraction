@@ -5,11 +5,9 @@ import matplotlib
 matplotlib.rcParams['backend'] = "Qt4Agg"
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
-import pyfits
 import pylab
 import time
 import copy
-import semipolar
 from matplotlib import rc
 from astropy.io import fits
 from scipy.optimize import curve_fit

@@ -27,12 +27,11 @@ if __name__ == "__main__":
     #galfa = 'D:/SC_241.66_28.675.best.fits'
 
     for i in [17, 18, 19, 20, 21, 22]:
-        for key in ['']: #'GALFA'+str(i)]:
+        for _key in ['']: #'GALFA'+str(i)]:
             filename = prefix + str(i) + outsuffix
-            isolate.update_key(filename, key, force=False)
-            isolate.plot(filename, key=key, out_name=filename[:-5]+'_'+key+'.png')
-            isolate.plot(filename, key=key, out_name=filename[:-5]+'_'+key+'_50.png', cut=(lambda h: h.header['B_MIN'] > 50.0))
-
+            #isolate.update_key(filename, _key, force=True)
+            isolate.plot(filename, key=_key, out_name=filename[:-5]+'_'+_key+'.png')
+            #isolate.plot(filename, key=_key, out_name=filename[:-5]+'_'+_key+'_50.png', cut=(lambda h: h.header['B_MIN'] > 50.0))
             '''
             try:
 
@@ -42,4 +41,6 @@ if __name__ == "__main__":
             #os.system('python isolate.py '+inprefix+str(i)+outsuffix)
             
             #os.system('python isolate.py '+inprefix+str(i)+insuffix)
+
+            print 'Finished', str(i)
 

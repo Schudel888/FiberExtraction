@@ -2,14 +2,22 @@
 #ROLLING HOUGH TRANSFORM FIBER EXTRACTION
 #Susan Clark, Lowell Schudel
 #for GALFA0 conversion http://www.atnf.csiro.au/people/Tobias.Westmeier/tools_hihelpers.php
-
+#-----------------------------------------------------------------------------------------
+# Initialization: Imports
+#-----------------------------------------------------------------------------------------
+from __future__ import division #Must be first line of code in the file
 from astropy.io import fits
 import operator
 import numpy as np
 import scipy.stats
-import collections
 import math
 import datetime
+
+import myfavoritefiber
+
+print ''
+print '#Beginning import of config.py'
+print '{'
 
 #-----------------------------------------------------------------------------------------
 # Initialization: Convenience Functions
@@ -20,12 +28,16 @@ def timestamp():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def passive_constant(value):
-    #Given active_constant(value)(x) --> returns value #Ignores x
+    #Given passive_constant(value)(x) --> returns value #Ignores x
     return lambda x: value
 
 def active_constant(function):
-    #Given active_constant(f)(x) --> returns f() #Ignores x
+    #Given active_constant(function)(x) --> returns function() #Ignores x
     return lambda x: function()
+
+def stubborn_constant(function, value):
+    #Given stubborn_constant(function, value)(x) --> returns function(value) #Ignores x
+    return lambda x: function(value)
 
 def chained(functions):
     #Given chained([f,g,h,..])(x) --> returns ..h(g(f(x)))
@@ -43,9 +55,36 @@ def bridged(funca, funcb):
     #funca must expect n arguments
     return lambda x: funca(*funcb(x))
 
+def rel_add((a,b), (c,d)):
+    return a+c,b+d
+
 def default_open(filename, mode='readonly'):
     print 'Accessing: '+filename+' '
     return fits.open(filename, mode=mode, memmap=True, save_backup=False, checksum=True, ignore_missing_end=True)
+
+def GALFAx(integer):
+    assert isinstance(integer, int)
+    assert 0<integer<40
+    gx = {'GALFA'+str(integer): 
+    (
+        'D:/SC_241.66_28.675.best.fits', 
+        lambda x: np.nan_to_num(default_open(x)[0].data[integer]).clip(0.0, np.inf)*1.823E18,
+        np.log10,
+        ['_AVG', '_MED', '_TOT']
+    )}
+    return gx
+
+'''
+def GALFAxN(integer):
+    assert isinstance(integer, int)
+    return 'GALFA'+str(integer), (
+
+        'D:/SC_241.66_28.675.best.fits', 
+        lambda x: np.nan_to_num(default_open(x)[0].data[22]).clip(0.0, np.inf)*1.823E18,
+        np.log10,
+        ['_AVG', '_MED', '_TOT']
+    )
+'''
 
 #-----------------------------------------------------------------------------------------
 # Initialization: Class Definitions
@@ -58,19 +97,20 @@ class Cloud:
         'MAX_Y': (operator.attrgetter('max_y'), 'Upper-right y-coordinate of mask in backprojection'),
         'AREA': (chained([operator.attrgetter('mask'), operator.attrgetter('size')]), 'Area covered by this mask'),
         'LITPIX': (chained([operator.attrgetter('points'), len]), 'Number of nonzero pixels in the mask'),
-        'DIAG': (chained([operator.attrgetter('mask'), bridged(math.hypot, operator.attrgetter('shape'))]), 'Diagonal size of filament, corner-to-corner major-axis'),
-        'OFF_DIAG': (lambda x: 4.0*float(len(x.points))/(np.pi*math.hypot(*x.mask.shape)), 'Off-diagonal size of filament, computed minor-axis')
+        'DIAG': (chained([operator.attrgetter('mask'), bridged(math.hypot, operator.attrgetter('shape'))]), 'Diagonal size of filament, ~major-axis'),
+        'OFF_DIAG': (lambda x: 4.0*float(len(x.points))/(np.pi*math.hypot(*x.mask.shape)), 'Off-diagonal size of filament, ~minor-axis')
     }
- 
+
+    @staticmethod
+    def on_and_off_masks_from_HDU(hdu, transpose=False):
+        cloud = Cloud(hdu)
+        if transpose:
+            cloud.mask.T, myfavoritefiber.off_fiber(cloud.mask.T)
+        else:
+            return cloud.mask, myfavoritefiber.off_fiber(cloud.mask)
+
     @staticmethod
     def nonzero_data_from_HDU(hdu, transpose=False):
-        '''
-        try:
-            #TODO
-            sparse = hdu.header['SPARSE']
-        except Exception:
-            sparse = None
-        '''
         if isinstance(hdu, fits.BinTableHDU):
             if transpose:
                 return (hdu.data['xs'], hdu.data['ys'])
@@ -120,9 +160,12 @@ class Cloud:
     def __init__(self, list_of_points):
         #Expects a python list of two-integer tuples, corresponding the the x,y coordinate of the points original location in the backprojection 
         if isinstance(list_of_points, Cloud):
-            self.points = list_of_points
+            self.points = list_of_points.points
         elif isinstance(list_of_points, fits.BinTableHDU) or isinstance(list_of_points, fits.ImageHDU):
-            self.points = zip(*Cloud.nonzero_data_from_HDU(list_of_points, transpose=False))
+            min_coord = list_of_points.header['MIN_X'],list_of_points.header['MIN_Y'] 
+            rel_coords = zip(*Cloud.nonzero_data_from_HDU(list_of_points, transpose=False))
+            self.points = [rel_add(min_coord, rel_coord) for rel_coord in rel_coords]
+            del min_coord, rel_coords
         elif isinstance(list_of_points, tuple):
             if len(list_of_points) > 2:
                 self.points = list(set(list_of_points))
@@ -185,90 +228,59 @@ sources = {
         chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(np.s_[16:25]), lambda x: np.nansum(x, axis=0), lambda x: np.multiply(x, 1.823E18)]),
         np.log10,
         ['_AVG', '_MED', '_TOT']
-    ), 
-    'GALFA17': (
-        'D:/SC_241.66_28.675.best.fits', 
-        lambda x: np.nan_to_num(default_open(x)[0].data[17]).clip(0.0, np.inf)*1.823E18,
-        np.log10,
-        ['_AVG', '_MED', '_TOT']
-    ),
-    'GALFA18': (
-        'D:/SC_241.66_28.675.best.fits', 
-        lambda x: np.nan_to_num(default_open(x)[0].data[18]).clip(0.0, np.inf)*1.823E18,
-        np.log10,
-        ['_AVG', '_MED', '_TOT']
-    ), 
-    'GALFA19': (
-        'D:/SC_241.66_28.675.best.fits', 
-        lambda x: np.nan_to_num(default_open(x)[0].data[19]).clip(0.0, np.inf)*1.823E18,
-        np.log10,
-        ['_AVG', '_MED', '_TOT']
-    ),
-    'GALFA20': (
-        'D:/SC_241.66_28.675.best.fits', 
-        lambda x: np.nan_to_num(default_open(x)[0].data[20]).clip(0.0, np.inf)*1.823E18,
-        np.log10,
-        ['_AVG', '_MED', '_TOT']
-    ),
-    'GALFA21': (
-        'D:/SC_241.66_28.675.best.fits', 
-        lambda x: np.nan_to_num(default_open(x)[0].data[21]).clip(0.0, np.inf)*1.823E18,
-        np.log10,
-        ['_AVG', '_MED', '_TOT']
-    ),
-    'GALFA22': (
-        'D:/SC_241.66_28.675.best.fits', 
-        lambda x: np.nan_to_num(default_open(x)[0].data[22]).clip(0.0, np.inf)*1.823E18,
-        np.log10,
-        ['_AVG', '_MED', '_TOT']
     ),
     'B': (
         'D:/SC_241_2d_bs.npy',
         np.load,
         identity,
         ['_MAX', '_MIN']
-    ),
-    '': (
-        None,
-        identity,
-        identity,
-        list(Cloud.functions.iterkeys())
     )
-}#operator.methodcaller('sum', axis=0)
+}
 
 source_data = dict()
 applicable_methods = dict()
 post_processing = dict() #collections.defaultdict(identity)
-for k,v in sources.iteritems():
-    try:
-        source_data[k] = v[1](v[0])
-        post_processing[k] = v[2]
-        applicable_methods[k] = v[3]
-    except Exception as e:
-        print 'WARNING: Unable to find source data for '+str(k)+' keyword using '+str(v[0])+' as an initial input.. (Modify config.py for better results!)'
-        print repr(e)
 
-'''
-possible_keys = list()
-for key in sources.iterkeys():
-    for suffix in sources[key][3]:
-        possible_keys.append(key+suffix) 
+def clear():
+    source_data.clear()
+    applicable_methods.clear()
+    post_processing.clear()
 
-def is_complete(cloud_HDU, fix=True):
-    try:
-        hdr = cloud_HDU.header
-        for key in possible_keys:
-            assert key in hdr
-        return True
-    except Exception:
-        if not fix:
-            return False
-        else:
-            print 'Unable to fix Cloud in config.is_complete'
-            #TODO
-            return False
-'''
+def exclude(*keys):
+    for key in keys:
+        if key in sources:
+            del sources[key]
+        if key in source_data:
+            del source_data[key]
+        if key in post_processing:
+            del post_processing[key]
+        if key in applicable_methods:
+            del applicable_methods[key]
+        
+def include(dictionary):
+    assert isinstance(dictionary, dict)
+    for k,v in dictionary.iteritems():
+        try:
+            source_data[k] = v[1](v[0])
+            post_processing[k] = v[2]
+            applicable_methods[k] = v[3]
+        except Exception as e:
+            print 'WARNING: Unable to find source data for '+str(k)+' keyword using '+str(v[0])+' as an initial input.. (Modify config.py for better results!)'
+            print repr(e)
 
+include(sources)
+include({'': (
+    None,
+    identity,
+    identity,
+    list(Cloud.functions.iterkeys())
+)})
+for i in range(17,23): include(GALFAx(i))
+
+
+print '} '
+print '#Done importing config.py '
+print ''
 
 
 
