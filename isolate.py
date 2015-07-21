@@ -57,6 +57,10 @@ def handle(fileobj, mode='readonly'):
         assert rht.xyt_suffix in filaments_filename
         assert SUFFIX in filaments_filename
 
+        if hdu_list.fileinfo(0)['filemode'] != mode:
+            hdu_list.close() 
+            hdu_list = config.default_open(filaments_filename, mode)
+
     else:
         raise ValueError(repr(fileobj))
 
@@ -136,10 +140,10 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
     #TODO make sure to pop skip hdus!s
     hdu_list = filter(cut, hdu_list) #TODO
 
-    figure_args = {'figsize':(8,7), 'facecolor':'white','dpi':250}
-    fig = plt.figure(**figure_args)
 
     if key is None:
+        figure_args = {'figsize':(8,7), 'facecolor':'white','dpi':250}
+        fig = plt.figure(**figure_args)
         #display = np.zeros((backproj.header['NAXIS1'], backproj.header['NAXIS2']))
         display = np.empty((backproj.header['NAXIS1'], backproj.header['NAXIS2'])).fill(np.nan)
         N = len(hdu_list)
@@ -190,6 +194,8 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
                     exit()
 
         Nplots = len(titles)
+        figure_args = {'figsize':(8,2.5*Nplots-0.5), 'facecolor':'white','dpi':250}
+        fig = plt.figure(**figure_args)
         r=4
         gs = gridspec.GridSpec(Nplots*r, 5*r)
         #for i in range(Nplots):
