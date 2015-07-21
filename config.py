@@ -16,6 +16,9 @@ import datetime
 #-----------------------------------------------------------------------------------------
 identity = lambda x:x
 
+def timestamp():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 def passive_constant(value):
     #Given active_constant(value)(x) --> returns value #Ignores x
     return lambda x: value
@@ -161,8 +164,7 @@ methods = {
     '_MED':scipy.stats.nanmedian,
     '_TOT':np.nansum,    
     '_MIN':np.nanmin,
-    '_MAX':np.nanmax,
-    '':chained([active_constant(datetime.datetime.now), operator.methodcaller('strftime', "%Y-%m-%d %H:%M:%S")])
+    '_MAX':np.nanmax
 }
 
 sources = {
@@ -178,6 +180,42 @@ sources = {
         np.log10,
         ['_AVG', '_MED', '_TOT']
     ), 
+    'GALFA17': (
+        'D:/SC_241.66_28.675.best.fits', 
+        lambda x: np.nan_to_num(default_open(x)[0].data[17]).clip(0.0, np.inf)*1.823E18,
+        np.log10,
+        ['_AVG', '_MED', '_TOT']
+    ),
+    'GALFA18': (
+        'D:/SC_241.66_28.675.best.fits', 
+        chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(18), lambda x: np.multiply(x, 1.823E18)]),
+        np.log10,
+        ['_AVG', '_MED', '_TOT']
+    ), 
+    'GALFA19': (
+        'D:/SC_241.66_28.675.best.fits', 
+        chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(19), lambda x: np.multiply(x, 1.823E18)]),
+        np.log10,
+        ['_AVG', '_MED', '_TOT']
+    ),
+    'GALFA20': (
+        'D:/SC_241.66_28.675.best.fits', 
+        chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(20), lambda x: np.multiply(x, 1.823E18)]),
+        np.log10,
+        ['_AVG', '_MED', '_TOT']
+    ),
+    'GALFA21': (
+        'D:/SC_241.66_28.675.best.fits', 
+        chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(21), lambda x: np.multiply(x, 1.823E18)]),
+        np.log10,
+        ['_AVG', '_MED', '_TOT']
+    ),
+    'GALFA22': (
+        'D:/SC_241.66_28.675.best.fits', 
+        chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(22), lambda x: np.multiply(x, 1.823E18)]),
+        np.log10,
+        ['_AVG', '_MED', '_TOT']
+    ),
     'B': (
         'D:/SC_241_2d_bs.npy',
         np.load,
@@ -199,7 +237,6 @@ for k,v in sources.iteritems():
     try:
         source_data[k] = v[1](v[0])
         post_processing[k] = v[2]
-        v[3].append('')
         applicable_methods[k] = v[3]
     except Exception as e:
         print 'WARNING: Unable to find source data for '+str(k)+' keyword using '+str(v[0])+' as an initial input.. (Modify config.py for better results!)'

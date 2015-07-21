@@ -5,9 +5,9 @@
 #-----------------------------------------------------------------------------------------
 #Imports
 #-----------------------------------------------------------------------------------------
-#import isolate
-import os
-
+#import os
+#import config
+import isolate
 
 #-----------------------------------------------------------------------------------------
 # Plotting Functions
@@ -20,20 +20,25 @@ import os
 if __name__ == "__main__":
 
 
-    inprefix = 'D:/SC_241.66_28.675.best_'
-    insuffix = '_xyt_w75_s15_t70_filaments.fits'
+    prefix = 'D:/SC_241.66_28.675.best_'
+    insuffix = '_xyt_w75_s15_t70.fits'
+    outsuffix = '_xyt_w75_s15_t70_filaments.fits'
+    
+    #galfa = 'D:/SC_241.66_28.675.best.fits'
 
-    #outs = [('LITPIX', '_filaments_litpix.png'), 
-    outs= [('COLDENS','_average_coldens.png')]
+    for i in [17]: #, 18, 19, 20, 21, 22]:
+        filename = prefix + str(i) + outsuffix
+        key = 'GALFA'+str(i)
+        hdu_list, key = isolate.update_key(filename, key, force=True) #False)
+        isolate.plot(hdu_list, key=key, out_name=filename[:-5]+'_'+key+'.png')
+        isolate.plot(hdu_list, key=key, out_name=filename[:-5]+'_'+key+'_50.png', cut=(lambda h: h.header['B_MIN'] > 50.0))
 
-    ls = [18, 19, 20, 21]
-    for i in ls:
-        os.system('python isolate.py '+inprefix+str(i)+insuffix)
+
         '''
-        for j,k in outs:
-            outname = 'D:/'+str(i)+k
-            filename = inprefix+str(i)+insuffix
-            key = j
-            isolate.plot(outname, filename, key)
+        try:
+            except Exception:
         '''
+        #os.system('python isolate.py '+inprefix+str(i)+outsuffix)
+        
+        #os.system('python isolate.py '+inprefix+str(i)+insuffix)
 
