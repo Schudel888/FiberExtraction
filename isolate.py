@@ -21,7 +21,6 @@ import math
 import matplotlib
 #matplotlib.rcParams['backend'] = 'TkAgg'
 matplotlib.rcParams['image.origin'] = 'lower'
-#matplotlib.rcParams['figure.figsize'] = 6,6
 #matplotlib.rcParams['figure.dpi'] = 200
 from matplotlib import pyplot as plt
 from matplotlib import gridspec
@@ -40,33 +39,36 @@ skip = 1 #Number of HDUs that do not correspond to filaments in output files
 #-----------------------------------------------------------------------------------------
 # File Handling
 #-----------------------------------------------------------------------------------------
-def handle(fileobj, mode='readonly'):
+def is_xyt_filename(fileobj):
+    try:
+        assert isinstance(fileobj, str)    
+        assert fileobj.endswith('.fits')
+        assert rht.xyt_suffix in fileobj
+        assert SUFFIX not in fileobj
+        return True
+    except Exception:
+        return False
 
-    if isinstance(fileobj, str):
+def is_filament_filename(fileobj):
+    try:
+        assert isinstance(fileobj, str)    
         assert fileobj.endswith('.fits')
         assert rht.xyt_suffix in fileobj
         assert SUFFIX in fileobj
-        print 'Accessing: '+fileobj+' '
-        hdu_list = config.default_open(fileobj, mode)
-        filaments_filename = fileobj
+        return True
+    except Exception:
+        return False
 
-    elif isinstance(fileobj, fits.HDUList):
-        hdu_list = fileobj
-        filaments_filename = hdu_list.filename()
+def is_filament_hdu_list(fileobj):
+    try:
+        assert isinstance(fileobj, fits.HDUList)
+        filaments_filename = fileobj.filename()
         assert filaments_filename.endswith('.fits')
         assert rht.xyt_suffix in filaments_filename
         assert SUFFIX in filaments_filename
-
-        if hdu_list.fileinfo(0)['filemode'] != mode:
-            hdu_list.close() 
-            hdu_list = config.default_open(filaments_filename, mode)
-
-    else:
-        raise ValueError(repr(fileobj))
-
-    #xyt_filename = string.rstrip(filaments_filename, SUFFIX+'fits')+'.fits' TODO xyt?
-
-    return filaments_filename, hdu_list
+        return True
+    except Exception:
+        return False
 
 #-----------------------------------------------------------------------------------------
 # Post-Processing Functions
@@ -75,148 +77,181 @@ def update_key(filaments_filename, key, external_source=None, force=False):
     #Computes the average value of the dataset indicated by key or external_source for each filament
     #Saves the value to the associated header entry of each filament
     assert isinstance(key, str)
-    filaments_filename, hdu_list = handle(filaments_filename, mode='update')
+    
+    def do_update(hdu_list):
+        if not force and key in hdu_list[skip].header:
+            print key+' keyword found in filament header...'
+            if 'y' not in raw_input('Overwrite? ([no]/yes):  '):
+                return hdu_list, key
 
-    if not force and key in hdu_list[skip].header:
-        print key+' keyword found in filament header...'
-        if 'y' not in raw_input('Overwrite? ([no]/yes):  '):
-            return hdu_list, key
-
-    if external_source is not None:
-        correlation_data = external_source
-    elif key in config.source_data:
-        correlation_data = config.source_data[key]
-    else:
-        raise KeyError('No source given for key: '+key)
-
-    #for i, hdu in enumerate(hdu_list[skip:]):
-    for hdu in hdu_list[skip:]:
-        hdr = hdu.header
-        if correlation_data is not None:
-            #Assumes correlation_data can be indexed into using ndarray notation [LowerLeft to UpperRight+1]
-            #Assumes config.Cloud.nonzero_data_from_HDU will return the pixel coords offset properly for the above masked region
-            #Assumes func can take this weird ndarray view as input and return a scalar value
-            for suffix in config.applicable_methods[key]:        
-                func = config.methods[suffix]
-                hdr[key+suffix] = func(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=True)])
+        if external_source is not None:
+            correlation_data = external_source
+        elif key in config.source_data:
+            correlation_data = config.source_data[key]
         else:
-            #Assumes all func require a config.Cloud object to work
-            tempCloud = config.Cloud(hdu)
-            for suffix in config.applicable_methods[key]:        
-                func = config.Cloud.functions[suffix][0]
-                hdr[key+suffix] = func(tempCloud)
-        hdr[key] = config.timestamp()
+            raise KeyError('No source given for key: '+key)
 
-    hdu_list.flush()
-    return hdu_list, key
+        #for i, hdu in enumerate(hdu_list[skip:]):
+        for hdu in hdu_list[skip:]:
+            hdr = hdu.header
+            if correlation_data is not None:
+                #Assumes correlation_data can be indexed into using ndarray notation [LowerLeft to UpperRight+1]
+                #Assumes config.Cloud.nonzero_data_from_HDU will return the pixel coords offset properly for the above masked region
+                #Assumes func can take this weird ndarray view as input and return a scalar value
+                for suffix in config.applicable_methods[key]:        
+                    func = config.methods[suffix]
+                    hdr[key+suffix] = func(correlation_data[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=True)])
+            else:
+                #Assumes all func require a config.Cloud object to work
+                tempCloud = config.Cloud(hdu)
+                for suffix in config.applicable_methods[key]:        
+                    func = config.Cloud.functions[suffix][0]
+                    hdr[key+suffix] = func(tempCloud)
+            hdr[key] = config.timestamp()
+
+        hdu_list.flush()
+
+    if is_filament_filename(filaments_filename):
+        with config.default_open(filaments_filename, mode='update') as hdu_list:
+            do_update(hdu_list)
+        return filaments_filename
+
+    elif is_filament_hdu_list(filaments_filename):
+        hdu_list = filaments_filename
+        assert hdu_list.fileinfo(0)['filemode'] == 'update'
+        do_update(hdu_list)
+        return hdu_list, key
+
+    else:
+        print 'Unknown input encountered in update_key()...'
+        return None
 
 def update_all_keys(filaments_filename):
     #Updates the properties corresponding to all known sources
-    filaments_filename, hdu_list = handle(filaments_filename, mode='update')
 
-    exceptions = ''
-    for key in config.sources.iterkeys():
-        try:
-            update_key(hdu_list, key, force=True)
-        except Exception as e:
-            print e
-            if len(exceptions) == 0:
-                exceptions += 'except '+key
-            else:
-                exceptions += ', '+key
+    def do_update_all(hdu_list)
+        exceptions = ''
+        for key in config.sources.iterkeys():
+            try:
+                update_key(hdu_list, key, force=True) #TODO Don't need to do anything with the output?
+            except Exception as e:
+                print e
+                if len(exceptions) == 0:
+                    exceptions += 'except '+key
+                else:
+                    exceptions += ', '+key
+        if len(exceptions) > 0 and string.count(exceptions, ',') > 0:
+            exceptions = string.join(string.rsplit(exceptions, ',', 1), ' and')
+        return 'All properties '+exceptions+'are now up to date in '+filaments_filename
+        
+    if is_filament_filename(filaments_filename):
+        with config.default_open(filaments_filename, mode='update') as hdu_list:
+            print do_update_all(hdu_list)
+        return filaments_filename
 
-    if len(exceptions) > 0 and string.count(exceptions, ',') > 0:
-        exceptions = string.join(string.rsplit(exceptions, ',', 1), ' and')
-    print 'All properties '+exceptions+'are now up to date in '+filaments_filename
-    return hdu_list #TODO what should this return? should I close the hdu_list?
+    elif is_filament_hdu_list(filaments_filename):
+        hdu_list = filaments_filename
+        assert hdu_list.fileinfo(0)['filemode'] == 'update'
+        print do_update_all(hdu_list)
+        return hdu_list, key
+
+    else:
+        print 'Unknown input encountered in update_all_key()...'
+        return None
+
 
 def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.passive_constant(True)):
     if not show and out_name is None:
-        'Unable to plot data without showing or saving it'
-        return 
+        'Unable to plot data without showing or saving it in isolate.plot()'
+        return None
 
-    filaments_filename, hdu_list = handle(filaments_filename)
-    backproj = hdu_list.pop(0)
-    #TODO make sure to pop skip hdus!s
-    hdu_list = filter(cut, hdu_list) #TODO
+    def do_plot(hdu_list):
+        try:
+            backproj = hdu_list.pop(0)
+            #TODO make sure to pop skip hdus!s
+            hdu_list = filter(cut, hdu_list) #TODO
 
+            if key is None:
+                figure_args = {'figsize':(8,6), 'facecolor':'white','dpi':250}
+                fig = plt.figure(**figure_args)
+                #display = np.zeros((backproj.header['NAXIS1'], backproj.header['NAXIS2']))
+                display = np.empty((backproj.header['NAXIS1'], backproj.header['NAXIS2'])).fill(np.nan)
+                N = len(hdu_list)
+                for i, hdu in enumerate(hdu_list):
+                    hdr = hdu.header            
+                    display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=False)] = N-i
+                ax1 = fig.add_axes([0.05,0.05,0.90,0.90])
+                ax1.imshow(display.T)
+                key = 'Filaments'
 
-    if key is None:
-        figure_args = {'figsize':(8,7), 'facecolor':'white','dpi':250}
-        fig = plt.figure(**figure_args)
-        #display = np.zeros((backproj.header['NAXIS1'], backproj.header['NAXIS2']))
-        display = np.empty((backproj.header['NAXIS1'], backproj.header['NAXIS2'])).fill(np.nan)
-        N = len(hdu_list)
-        for i, hdu in enumerate(hdu_list):
-            hdr = hdu.header            
-            display[hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=False)] = N-i
-        ax1 = fig.add_axes([0.05,0.05,0.95,0.95])
-        ax1.imshow(display.T)
-        key = 'Filaments'
+            elif isinstance(key, str) and key in hdu_list[skip].header:
+                displays = dict()
+                datasets = dict()
+                titles = [key+suffix for suffix in config.applicable_methods[key]] 
 
-    elif isinstance(key, str) and key in hdu_list[skip].header:
-        displays = dict()
-        datasets = dict()
-        #suffixes = config.applicable_methods[key]
-        titles = [key+suffix for suffix in config.applicable_methods[key]] #suffixes]
+                #for suffix in suffixes:    
+                for title in titles:
+                    displays[title] = np.zeros_like(backproj.data)
+                    displays[title].fill(np.nan)
+                    datasets[title] = config.post_processing[key]([hdu.header[title] for hdu in hdu_list]) #TODO watch out for python list handling
 
-        def nans_like(nparray):
-            a = np.empty_like(nparray)
-            a.fill(np.nan)
-            return a 
+                #for hdu in hdu_list:
+                for i, hdu in enumerate(hdu_list):      
+                    hdr = hdu.header
+                    #for suffix in suffixes:
+                    for title in titles:
+                        try:
+                            #mask = displays[key+suffix][hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1]
+                            #displays[key+suffix][hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=True)].fill(datasets[key+suffix][i])
+                            displays[title][hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=True)] = datasets[title][i] #.fill(datasets[title][i]) 
+                        except Exception as e:
+                            print e
+                            print 'Failed to plot data from (1-indexed) HDU:', i+1+skip, title
 
-        #for suffix in suffixes:    
-        for title in titles:
-            '''    
-            #displays[key+suffix] = np.zeros((backproj.header['NAXIS1'], backproj.header['NAXIS2']))
-            displays[key+suffix] = np.zeros_like(backproj.data)
-            displays[key+suffix].fill(np.nan)
-            #raw_data = map(operator.itemgetter(key+suffix), map(operator.attrgetter('header'), hdu_list)) 
-            raw_data = [hdu.header[key+suffix] for hdu in hdu_list]
-            datasets[key+suffix] = config.post_processing[key](raw_data) #TODO watch out for python list handling
-            '''
-            displays[title] = np.zeros_like(backproj.data)
-            displays[title].fill(np.nan)
-            datasets[title] = config.post_processing[key]([hdu.header[title] for hdu in hdu_list]) #TODO watch out for python list handling
+                Nplots = len(titles)
+                figure_args = {'figsize':(8,2.5*Nplots-0.5), 'facecolor':'white','dpi':250}
+                fig = plt.figure(**figure_args)
+                r=4
+                gs = gridspec.GridSpec(Nplots*r, 5*r)
+                for i, title in enumerate(titles):
+                    ax1 = plt.subplot(gs[1+r*i:r*(i+1),0:-4]) 
+                    ax2 = plt.subplot(gs[1+r*i:r*(i+1)-1,-3:-1])
+                    ax2.hist(datasets[title], bins=50, orientation='horizontal', histtype='stepfilled')
+                    plt.colorbar(ax1.imshow(displays[title], cmap = "YlOrRd"), ax=ax2, fraction=0.10)
+                    plt.title(title, fontsize=8)
+            
+            else:
+                print 'Unable to plot data using the given key: '+str(key)
+                return
+        
+            plt.suptitle(key+' from '+hdu_list.filename(), fontsize=12)
+            if out_name is not None and isinstance(out_name, str):
+                plt.savefig(out_name, dpi=500, format='png')
+            if show:
+                plt.show()
 
-        #for hdu in hdu_list:
-        for i, hdu in enumerate(hdu_list):      
-            hdr = hdu.header
-            #for suffix in suffixes:
-            for title in titles:
-                try:
-                    #mask = displays[key+suffix][hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1]
-                    #displays[key+suffix][hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=True)].fill(datasets[key+suffix][i])
-                    displays[title][hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=True)] = datasets[title][i] #.fill(datasets[title][i]) 
-                except Exception as e:
-                    print e
-                    print 'Failed to plot data from (1-indexed) HDU:', i+1+skip, title
-                    exit()
+        except Exception as error:
+            print error
 
-        Nplots = len(titles)
-        figure_args = {'figsize':(8,2.5*Nplots-0.5), 'facecolor':'white','dpi':250}
-        fig = plt.figure(**figure_args)
-        r=4
-        gs = gridspec.GridSpec(Nplots*r, 5*r)
-        #for i in range(Nplots):
-        for i, title in enumerate(titles):
-            #title = key+suffixes[i]
-            ax1 = plt.subplot(gs[1+r*i:r*(i+1),0:-4]) 
-            ax2 = plt.subplot(gs[1+r*i:r*(i+1)-1,-3:-1])
-            ax2.hist(datasets[title], bins=50, orientation='horizontal', histtype='stepfilled')
-            plt.colorbar(ax1.imshow(displays[title], cmap = "YlOrRd"), ax=ax2, fraction=0.10)
-            plt.title(title, fontsize=8)
-    
+        finally:
+            plt.cla()
+            plt.clf() 
+            plt.close()
+
+    if is_filament_filename(filaments_filename):
+        with config.default_open(filaments_filename, mode='update') as hdu_list:
+            do_plot(hdu_list)
+        return filaments_filename
+
+    elif is_filament_hdu_list(filaments_filename):
+        hdu_list = filaments_filename
+        assert hdu_list.fileinfo(0)['filemode'] == 'update'
+        do_plot(hdu_list)
+        return hdu_list, key
+
     else:
-        print 'Unable to plot data using the given key: '+str(key)
-        return
-    
-    plt.suptitle(key+' from '+filaments_filename, fontsize=12)
-    if out_name is not None and isinstance(out_name, str):
-        plt.savefig(out_name, dpi=500, format='png')
-    if show:
-        plt.show()
-    plt.clf() 
+        print 'Unknown input encountered in plot()...'
+        return None
 
 #-----------------------------------------------------------------------------------------
 # Bulk Fiber Isolation Functions
@@ -224,11 +259,7 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
 
 def isolate_all(xyt_filename, BINS=6, generateHDU=config.Cloud.as_ImageHDU): #config.Cloud.as_BinTableHDU):
 
-    #Read in RHT Output from filename_xyt??.fits
-    assert xyt_filename.endswith('.fits')
-    assert rht.xyt_suffix in xyt_filename
-    assert SUFFIX not in xyt_filename
-    print 'Accessing: '+xyt_filename+' '
+    assert is_xyt_filename(xyt_filename)
     hdu_list = config.default_open(xyt_filename)
     ntheta = hdu_list[0].header['NTHETA']
     wlen = hdu_list[0].header['WLEN']

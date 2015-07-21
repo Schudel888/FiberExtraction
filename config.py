@@ -44,6 +44,7 @@ def bridged(funca, funcb):
     return lambda x: funca(*funcb(x))
 
 def default_open(filename, mode='readonly'):
+    print 'Accessing: '+filename+' '
     return fits.open(filename, mode=mode, memmap=True, save_backup=False, checksum=True, ignore_missing_end=True)
 
 #-----------------------------------------------------------------------------------------
@@ -167,6 +168,11 @@ methods = {
     '_MAX':np.nanmax
 }
 
+'''
+'_ONOFF':,'_VWIDTH':, '_VMAX', 
+'''
+#None for v[0] in source indicates all functions should take a Cloud object as their argument
+#All else for v[0] assumes a 2Dimensional mask of data
 sources = {
     'COLDENS': (
         'D:/LAB_corrected_coldens.fits', 
@@ -188,31 +194,31 @@ sources = {
     ),
     'GALFA18': (
         'D:/SC_241.66_28.675.best.fits', 
-        chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(18), lambda x: np.multiply(x, 1.823E18)]),
+        lambda x: np.nan_to_num(default_open(x)[0].data[18]).clip(0.0, np.inf)*1.823E18,
         np.log10,
         ['_AVG', '_MED', '_TOT']
     ), 
     'GALFA19': (
         'D:/SC_241.66_28.675.best.fits', 
-        chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(19), lambda x: np.multiply(x, 1.823E18)]),
+        lambda x: np.nan_to_num(default_open(x)[0].data[19]).clip(0.0, np.inf)*1.823E18,
         np.log10,
         ['_AVG', '_MED', '_TOT']
     ),
     'GALFA20': (
         'D:/SC_241.66_28.675.best.fits', 
-        chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(20), lambda x: np.multiply(x, 1.823E18)]),
+        lambda x: np.nan_to_num(default_open(x)[0].data[20]).clip(0.0, np.inf)*1.823E18,
         np.log10,
         ['_AVG', '_MED', '_TOT']
     ),
     'GALFA21': (
         'D:/SC_241.66_28.675.best.fits', 
-        chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(21), lambda x: np.multiply(x, 1.823E18)]),
+        lambda x: np.nan_to_num(default_open(x)[0].data[21]).clip(0.0, np.inf)*1.823E18,
         np.log10,
         ['_AVG', '_MED', '_TOT']
     ),
     'GALFA22': (
         'D:/SC_241.66_28.675.best.fits', 
-        chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(22), lambda x: np.multiply(x, 1.823E18)]),
+        lambda x: np.nan_to_num(default_open(x)[0].data[22]).clip(0.0, np.inf)*1.823E18,
         np.log10,
         ['_AVG', '_MED', '_TOT']
     ),
