@@ -35,13 +35,13 @@ class ProgressBar:
                 return any(map(child_in_children, map(operator.attrgetter('_children'), children)))
 
         if not isinstance(child, ProgressBar):
-            raise ValueError('You can only append some ProgressBar to existing ProgressBar!')
+            raise ValueError('A ProgressBar can only have a ProgressBar appended to it!')
         elif child._parent is not None:
-            raise ValueError('A ProgressBar object can only have one parent!')
+            raise ValueError('A ProgressBar can only have one parent!')
         elif self == child:
-            raise ValueError('ProgressBar cannot be appended to itself!')
+            raise ValueError('A ProgressBar cannot be appended to itself!')
         elif child_in_children(self._children):
-            raise ValueError('ProgressBar cannot be appended to its own children!')
+            raise ValueError('A ProgressBar cannot contain more than one of the same child!')
         else:
             self._children.append(child)
             child._parent = self
@@ -83,6 +83,8 @@ class ProgressBar:
         else:
             raise ValueError('Invalid input to ProgressBar.update(): '+str(progress))
             #return progress #TODO
+
+        assert self._step == int(self._problem_size*self._prog)
 
         now = time.time()
         if self._start_time is None:

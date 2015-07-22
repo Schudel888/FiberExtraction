@@ -16,7 +16,7 @@ import datetime
 import myfavoritefiber
 
 print ''
-print '#Beginning import of config.py'
+print 'Starting config.py'
 print '{'
 
 #-----------------------------------------------------------------------------------------
@@ -60,7 +60,10 @@ def rel_add((a,b), (c,d)):
 
 def default_open(filename, mode='readonly'):
     print 'Accessing: '+filename+' '
+    #try:
     return fits.open(filename, mode=mode, memmap=True, save_backup=False, checksum=True, ignore_missing_end=True)
+    #except Exception:
+    #return fits.open(filename, mode=mode, memmap=False, save_backup=False, checksum=True, ignore_missing_end=True)
 
 def GALFAx(integer):
     assert isinstance(integer, int)
@@ -268,18 +271,17 @@ def include(dictionary):
             print 'WARNING: Unable to find source data for '+str(k)+' keyword using '+str(v[0])+' as an initial input.. (Modify config.py for better results!)'
             print repr(e)
 
-include(sources)
 include({'': (
     None,
     identity,
     identity,
     list(Cloud.functions.iterkeys())
 )})
-for i in range(17,23): include(GALFAx(i))
-
+include(sources)
+#for i in range(17,23): include(GALFAx(i))
 
 print '} '
-print '#Done importing config.py '
+print 'Finishing config.py '
 print ''
 
 

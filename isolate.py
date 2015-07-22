@@ -30,6 +30,8 @@ import config
 # Initialization: Program Settings
 #-----------------------------------------------------------------------------------------
 
+SILENT = False
+
 SUFFIX = '_filaments.'
 
 skip = 1 #Number of HDUs that do not correspond to filaments in output files
@@ -62,14 +64,18 @@ def is_filament_filename(fileobj):
 def is_filament_hdu_list(fileobj):
     try:
         assert isinstance(fileobj, fits.HDUList)
-        filaments_filename = fileobj.filename()
-        assert filaments_filename.endswith('.fits')
-        assert rht.xyt_suffix in filaments_filename
-        assert SUFFIX in filaments_filename
+        assert is_filament_filename(fileobj.filename())
         #TODO
         return True
     except Exception:
         return False
+
+
+def filament_filename_from_xyt_filename(xyt_filename):
+    assert is_xyt_filename(xyt_filename)
+    filaments_filename = string.join(string.rsplit(xyt_filename, '.', 1), SUFFIX)
+    assert is_filament_filename(filaments_filename)
+    return filaments_filename
 
 #-----------------------------------------------------------------------------------------
 # Post-Processing Functions
@@ -81,12 +87,13 @@ def update_key(filaments_filename, key, correlation_data=None, force=False):
     assert isinstance(key, str)
     
     def do_update(hdu_list, key, correlation_data, force):
-        print 'Updating key:', key, 'in', hdu_list.filename()
+        if not SILENT:
+            print 'Updating key:', key, 'in', hdu_list.filename()
 
-        if not force and key in hdu_list[skip].header:
-            print key+' keyword found in filament header...'
-            if 'y' not in raw_input('Overwrite? ([no]/yes):  '):
-                return hdu_list, key
+            if not force and key in hdu_list[skip].header:
+                print key+' keyword found in filament header...'
+                if 'y' not in raw_input('Overwrite? ([no]/yes):  '):
+                    return hdu_list, key
 
         #correlation_data can be None if and only if the functions you will call expect Cloud objects
         #else, it must correspond to a source_data and applicable_methods entry
@@ -133,19 +140,18 @@ def update_key(filaments_filename, key, correlation_data=None, force=False):
         return hdu_list, key
 
     else:
-        print 'Unknown input encountered in update_key()...'
-        return None
+        raise ValueError('Unknown input encountered in update_key()...')
 
 def update_all_keys(filaments_filename, force=False):
     #Updates the properties corresponding to all known sources
 
     def do_update_all(hdu_list, force):
-        print 'Updating all keys in', hdu_list.filename()
-
-        if not force:
-            print 'This is a long operation that involves updating ALL keys from config.sources'
-            if 'y' not in raw_input('Continue? ([no]/yes):  '):
-                return 'Aborted: update_all_keys()'
+        if not SILENT:
+            print 'Updating all keys in', hdu_list.filename()
+            if not force:            
+                print 'update_all_keys() is a long operation that involves everything in config.sources...'
+                if 'y' not in raw_input('Continue? ([no]/yes):  '):
+                    return 'Aborted: update_all_keys()'
 
         exceptions = ''
         for key in config.sources.iterkeys():
@@ -174,23 +180,23 @@ def update_all_keys(filaments_filename, force=False):
         return hdu_list, key
 
     else:
-        print 'Unknown input encountered in update_all_key()...'
-        return None
+        raise ValueError('Unknown input encountered in update_all_key()...')
 
 
 def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.passive_constant(True)):
     if not show and out_name is None:
-        'Unable to plot data without showing or saving it in isolate.plot()'
-        return None
+        raise ValueError('Unable to plot data without showing or saving it in isolate.plot()')
 
     def do_plot(hdu_list, key, out_name, show, cut):
-        try:
-            filaments_filename = hdu_list.filename()
+        
+        filaments_filename = hdu_list.filename()
+        if not SILENT:
             print 'Plotting key:', key, 'in', filaments_filename
-            backproj = hdu_list.pop(0)
-            #TODO make sure to pop skip hdus!s
-            hdu_list = filter(cut, hdu_list) #TODO TURNS AN HDULIST INTO A LIST ~_~
+        backproj = hdu_list.pop(0)
+        #TODO make sure to pop skip hdus!s
+        hdu_list = filter(cut, hdu_list) #TODO TURNS AN HDULIST INTO A LIST ~_~
 
+        try:
             if key is None:
                 figure_args = {'figsize':(8,6), 'facecolor':'white','dpi':250}
                 fig = plt.figure(**figure_args)
@@ -225,7 +231,7 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
                             #displays[key+suffix][hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=True)].fill(datasets[key+suffix][i])
                             displays[title][hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=True)] = datasets[title][i] #.fill(datasets[title][i]) 
                         except Exception as e:
-                            print e
+                            print e #TODO
                             print 'Failed to plot data from (1-indexed) HDU:', i+1+skip, title
 
                 Nplots = len(titles)
@@ -241,8 +247,7 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
                     plt.title(title, fontsize=8)
             
             else:
-                print 'Unable to plot data using the given key: '+str(key)
-                return
+                raise KeyError('Unable to plot data using the given key: '+str(key))
         
             plt.suptitle(key+' from '+filaments_filename, fontsize=12)
             if out_name is not None and isinstance(out_name, str):
@@ -250,8 +255,8 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
             if show:
                 plt.show()
 
-        except Exception as error:
-            print error
+        except Exception as e:
+            print e
 
         finally:
             plt.cla()
@@ -271,16 +276,26 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
         return hdu_list, key
 
     else:
-        print 'Unknown input encountered in plot()...'
-        return None
+        raise ValueError('Unknown input encountered in plot()...')
 
 #-----------------------------------------------------------------------------------------
 # Bulk Fiber Isolation Functions
 #-----------------------------------------------------------------------------------------
 
-def isolate_all(xyt_filename, BINS=6, generateHDU=config.Cloud.as_ImageHDU): #config.Cloud.as_BinTableHDU):
+def isolate_all(xyt_filename, BINS=6, force=False, sparse=False):
 
-    assert is_xyt_filename(xyt_filename)
+    filaments_filename = filament_filename_from_xyt_filename(xyt_filename) #Assertions inside function
+
+    if not force and os.path.isfile(filaments_filename):
+        if SILENT:
+            return filaments_filename
+        else:
+            print 'Filaments have already been isolated from', xyt_filename
+            print 'These are saved as', filaments_filename
+            if 'y' not in raw_input('Run isolate_all() anyway? ([no]/yes):  '):
+                print 'Aborted: isolate_all()'
+                return filaments_filename
+
     hdu_list = config.default_open(xyt_filename)
     ntheta = hdu_list[0].header['NTHETA']
     wlen = hdu_list[0].header['WLEN']
@@ -294,7 +309,12 @@ def isolate_all(xyt_filename, BINS=6, generateHDU=config.Cloud.as_ImageHDU): #co
     #Compute TheteRHT for all pixels given, then bin by theta
     B = map(rht.theta_rht,hdu_list[1].data['hthets']) #List of theta_rht values
     C = np.multiply(np.asarray(B), BINS/np.pi).astype(np.int_)
+    del B
     
+    #Ready the output HDUList and close the input HDUList
+    output_hdulist = fits.HDUList(hdu_list[0].copy()) #, open(filaments_filename, 'w')) #Overwrites
+    hdu_list.close()
+
     #Set Assignment
     #unprocessed = list()
     list_of_HDUs = list() 
@@ -304,17 +324,17 @@ def isolate_all(xyt_filename, BINS=6, generateHDU=config.Cloud.as_ImageHDU): #co
         raw_points = zip(Hi[delimiter],Hj[delimiter])
         del delimiter
         problem_size = len(raw_points)
-        message='Step '+str(bin+1)+'/'+str(BINS)+': (N='+str(problem_size)+')'
+        #message='Step '+str(bin+1)+'/'+str(BINS)+': (N='+str(problem_size)+')'
         #progress_bar = Progress(problem_size, message=message, incrementing=True)
 
         point_dict = dict([x[::-1] for x in enumerate(raw_points)])
         set_dict = collections.defaultdict(list)
-        theta_dict = dict()
+        #theta_dict = dict()
 
         for coord in raw_points:
             #rht.update_progress(0.3*(i/problem_size), message=message)
             #progress_bar.update()
-            theta_dict[coord] = B[point_dict[coord]]
+            #theta_dict[coord] = B[point_dict[coord]]
             for rel_coord in search_pattern:
                 try:
                     j = point_dict[config.rel_add(coord, rel_coord)]
@@ -345,11 +365,6 @@ def isolate_all(xyt_filename, BINS=6, generateHDU=config.Cloud.as_ImageHDU): #co
                     pass
         del sources, flags, G
 
-        #************************************************************************************************
-        #finished_map = np.negative(np.ones((naxis1, naxis2), dtype=np.int64))
-        #for pt in raw_points:
-            #finished_map[pt] = point_dict[pt]
-
         histogram = np.bincount(map(point_dict.get, raw_points))
         mask = np.nonzero(histogram >= int(frac*wlen))[0]
         del histogram
@@ -369,27 +384,29 @@ def isolate_all(xyt_filename, BINS=6, generateHDU=config.Cloud.as_ImageHDU): #co
                 continue
 
         while len(out_clouds) > 0:
-            #cloud = out_clouds.popitem()[1]
-            #unprocessed.append(out_clouds.popitem()[1])
-            list_of_HDUs.append(config.Cloud(out_clouds.popitem()[1]).as_HDU()) #TODO Incorporate theta_dict
-            #list_of_HDUs.append(generateHDU(config.Cloud(out_clouds.popitem()[1])))
+            cloud = out_clouds.popitem()[1]
+            #unprocessed.append(cloud)
+            list_of_HDUs.append(config.Cloud(cloud).as_HDU(sparse=sparse)) #TODO Incorporate theta_dict
+            
         #rht.update_progress(1.0, final_message='Finished joining '+str(problem_size)+' points! Time Elapsed:')
         
     #Convert lists of two-integer tuples into ImageHDUs
     #unprocessed.sort(key=len, reverse=True)
     #output_hdulist = fits.HDUList(map(config.Cloud.as_ImageHDU, map(config.Cloud, unprocessed)))
     #del unprocessed
-    list_of_HDUs.sort(key=config.chained([operator.attrgetter('header'), operator.itemgetter('DIAG')]), reverse=True) #lambda h: h.header['DIAG'], reverse=True)
-    output_hdulist = fits.HDUList(list_of_HDUs)
-    del list_of_HDUs
+    
+    list_of_HDUs.sort(key=lambda h: h.header['DIAG'], reverse=False)
+    while len(list_of_HDUs) > 0:
+        output_hdulist.append(list_of_HDUs.pop())
 
     #Output HDUList to File
-    output_filename = string.join(string.rsplit(xyt_filename, '.', 1), SUFFIX)
-    output_hdulist.insert(0, hdu_list[0].copy()) #TODO Introduces Errors in Reading FITS File 
-    output_hdulist.writeto(output_filename, output_verify='silentfix', clobber=True, checksum=True)
+    output_hdulist.writeto(filaments_filename, output_verify='silentfix', clobber=True, checksum=True)
+    output_hdulist.flush()
+    output_hdulist.close()
 
-    print 'Results successfully output to '+output_filename
-    return output_filename
+    if not SILENT:
+        print 'Results successfully output to '+filaments_filename
+    return filaments_filename
 
 #-----------------------------------------------------------------------------------------
 # Command Line Mode
@@ -406,12 +423,18 @@ if __name__ == "__main__":
 
     #Do Processing
     for filename in args.files: # loop over input files
-        if SUFFIX not in filename:
-            #This is hopefully an XYT RHT output file...
-            plot(isolate_all(filename))
-            #isolate_all(xyt_filename)
-        else:
-            #This would hopefully be a formerly run _filament.fits file...
+        
+        if is_xyt_filename(filename):
+            if not SILENT:
+                print 'Isolating filaments from', filename
+
+            #plot(isolate_all(filename))
+            isolate_all(filename)
+        
+        elif is_filament_filename(filename):
+            if not SILENT:
+                print 'Processing filaments from', filename
+
             #plot(filename)
             #plot(*update_key(filename, key='COLDENS'), out_name=filename[:-5]+'_COLDENS.png')
             #plot(*update_key(filename, key='GALFA0'), out_name=filename[:-5]+'_GALFA0.png')
@@ -420,8 +443,11 @@ if __name__ == "__main__":
             #plot(*update_key(filename, key='', force=True))
             update_all_keys(filename)
 
+        else:
+            raise RuntimeError('Cannot run isolate.py for'+filename)
+
     #Cleanup and Exit
-    #exit()
+    exit()
 
 
 
