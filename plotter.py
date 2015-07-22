@@ -8,6 +8,7 @@
 import os
 import isolate
 
+import config
 #-----------------------------------------------------------------------------------------
 # Plotting Functions
 #-----------------------------------------------------------------------------------------
@@ -18,64 +19,78 @@ import isolate
 
 if __name__ == "__main__":
 
-    available_integers = range(0,4)+range(10,25)+range(33,41)
+    all_available_integers = range(0,4)+range(10,25)+range(33,41)
+    available_integers = range(10,25)
+    
     prefix = 'D:/SC_241.66_28.675.best_'
     insuffix = '_xyt_w75_s15_t70.fits'
-    #outsuffix = '_xyt_w75_s15_t70_filaments.fits'
-
     plot_dir = 'D:/Plots/'
-    DO_PLOTS = False
-    FORCE = True
 
-    available_cuts = [('_50', lambda h: h.header['B_MIN'] > 50.0)]
-
+    #outsuffix = '_xyt_w75_s15_t70_filaments.fits'
     #galfa = 'D:/SC_241.66_28.675.best.fits'
 
+    #TODO DANGEROUS VARIABLES
+    DO_PLOTS = True
+    FORCE = False
+    isolate.SILENT = True 
+
+    available_cuts = [('_50', lambda h: h.header['B_MIN'] > 50.0)] #[(cut_name, _cut)]
+
     def available_keys(integer):
-        '''
-        keys = ['']
-        keys.append('B')
-        keys.append('GALFA'+str(integer))
-        '''
-        return ['B']
+        #return ['COLDENS']
+        #return ['B']
+        return ['GALFA'+str(integer)]
 
     #TODO
+
 
     print ''
     print 'Starting plotter.py'
     print '{'
 
-    #isolate.SILENT = True
-
-    for i in available_integers[2:]:
+    for i in available_integers:
         print 'Started:', str(i)
 
         xyt_filename = prefix + str(i) + insuffix
         assert isolate.is_xyt_filename(xyt_filename)
 
-        filaments_filename = isolate.isolate_all(xyt_filename, force=FORCE)
-        #isolate.filament_filename_from_xyt_filename(xyt_filename) #prefix + str(i) + outsuffix
+        filaments_filename = isolate.isolate_all(xyt_filename, force=FORCE) #isolate.filament_filename_from_xyt_filename(xyt_filename) #prefix + str(i) + outsuffix
         assert isolate.is_filament_filename(filaments_filename) 
-        if DO_PLOTS:
+
+        KEYS = available_keys(i)
+
+        if len(KEYS) == 0 and DO_PLOTS:
+            #Only open the file once in readonly mode
             isolate.plot(filaments_filename)
 
-        #TODO
-
-        for _key in available_keys(i):
-
-            isolate.update_key(filaments_filename, _key, force=FORCE)
+        elif len(KEYS) > 0:
+            #Open the file once, but allow for multiple uses
+            hdu_list = config.default_open(filaments_filename, mode='update')
+            assert isolate.is_filament_hdu_list(hdu_list)
             if DO_PLOTS:
-                isolate.plot(filaments_filename, key=_key, out_name=plot_dir+filaments_filename[:-5]+'_'+_key+'.png')
-            
-                for cut_name, _cut in available_cuts:        
-                    isolate.plot(filaments_filename, key=_key, out_name=plot_dir+filaments_filename[:-5]+'_'+_key+cut_name+'.png', cut=_cut)
-                                        
-                    #TODO
+                isolate.plot(hdu_list)
 
-            #TODO
+            for _key in KEYS:
 
+                isolate.update_key(hdu_list, _key, force=FORCE)
+
+                if DO_PLOTS:
+                    isolate.plot(hdu_list, key=_key, out_name=plot_dir+filaments_filename[:-5]+'_'+_key+'.png', show=False)
+                
+                    for cut_name, _cut in available_cuts:        
+                        isolate.plot(hdu_list, key=_key, out_name=plot_dir+filaments_filename[:-5]+'_'+_key+cut_name+'.png', cut=_cut, show=False)
+                                            
+                        #TODO
+
+                #TODO
+
+            try:
+                hdu_list.close()
+            except Exception:
+                pass
 
         print 'Finished:', str(i)
+        print ''
         #TODO
 
     print '} '

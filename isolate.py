@@ -9,6 +9,7 @@ from __future__ import division #Must be first line of code in the file
 from astropy.io import fits
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
+import os
 import sys
 import string
 import operator
@@ -90,7 +91,7 @@ def update_key(filaments_filename, key, correlation_data=None, force=False):
         if not SILENT:
             print 'Updating key:', key, 'in', hdu_list.filename()
 
-            if not force and key in hdu_list[skip].header:
+            if not force and (len(key) == 0 or key in hdu_list[skip].header):
                 print key+' keyword found in filament header...'
                 if 'y' not in raw_input('Overwrite? ([no]/yes):  '):
                     return hdu_list, key
@@ -154,7 +155,7 @@ def update_all_keys(filaments_filename, force=False):
                     return 'Aborted: update_all_keys()'
 
         exceptions = ''
-        for key in config.sources.iterkeys():
+        for key in config.sources.iterkeys(): #TODO NOT NECESSARILY VALID!
             try:
                 update_key(hdu_list, key, force=force) #TODO Don't need to do anything with the output?
             except Exception as e:
@@ -210,7 +211,7 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
                 ax1.imshow(display.T)
                 key = 'Filaments'
 
-            elif isinstance(key, str) and key in hdu_list[0].header: #skip].header:
+            elif isinstance(key, str) and (len(key) == 0 or key in hdu_list[0].header): #skip].header:
                 displays = dict()
                 datasets = dict()
                 titles = [key+suffix for suffix in config.applicable_methods[key]] 
@@ -285,13 +286,14 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
 def isolate_all(xyt_filename, BINS=6, force=False, sparse=False):
 
     filaments_filename = filament_filename_from_xyt_filename(xyt_filename) #Assertions inside function
+    if not SILENT:
+        print 'Isolating filaments from:', xyt_filename
 
     if not force and os.path.isfile(filaments_filename):
         if SILENT:
             return filaments_filename
         else:
-            print 'Filaments have already been isolated from', xyt_filename
-            print 'These are saved as', filaments_filename
+            print 'Filaments already saved as', filaments_filename
             if 'y' not in raw_input('Run isolate_all() anyway? ([no]/yes):  '):
                 print 'Aborted: isolate_all()'
                 return filaments_filename
@@ -401,8 +403,14 @@ def isolate_all(xyt_filename, BINS=6, force=False, sparse=False):
 
     #Output HDUList to File
     output_hdulist.writeto(filaments_filename, output_verify='silentfix', clobber=True, checksum=True)
-    output_hdulist.flush()
-    output_hdulist.close()
+    try:
+        output_hdulist.flush()
+    except Exception:
+        pass
+    try:
+        output_hdulist.close()
+    except Exception:
+        pass
 
     if not SILENT:
         print 'Results successfully output to '+filaments_filename
@@ -413,6 +421,7 @@ def isolate_all(xyt_filename, BINS=6, force=False, sparse=False):
 #-----------------------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    SILENT = False
 
     #Interpret Arguments
     parser = ArgumentParser(description="Run Fiber Isolation on 1 or more RHT output (.fits) files", usage='%(prog)s [options] file(s)', formatter_class=ArgumentDefaultsHelpFormatter)
@@ -425,23 +434,20 @@ if __name__ == "__main__":
     for filename in args.files: # loop over input files
         
         if is_xyt_filename(filename):
-            if not SILENT:
-                print 'Isolating filaments from', filename
 
             #plot(isolate_all(filename))
             isolate_all(filename)
         
         elif is_filament_filename(filename):
-            if not SILENT:
-                print 'Processing filaments from', filename
 
             #plot(filename)
             #plot(*update_key(filename, key='COLDENS'), out_name=filename[:-5]+'_COLDENS.png')
             #plot(*update_key(filename, key='GALFA0'), out_name=filename[:-5]+'_GALFA0.png')
-            #plot(*update_key(filename, key='B'))
+            #plot(*)
+            update_key(filename, key='B')
             #plot(filename, key='GALFA0', out_name=filename[:-5]+'_GALFA0_50.png', cut=lambda h: h.header['B_MIN'] > 50.0)
             #plot(*update_key(filename, key='', force=True))
-            update_all_keys(filename)
+            #update_all_keys(filename)
 
         else:
             raise RuntimeError('Cannot run isolate.py for'+filename)

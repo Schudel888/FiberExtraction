@@ -67,7 +67,7 @@ def default_open(filename, mode='readonly'):
 
 def GALFAx(integer):
     assert isinstance(integer, int)
-    assert 0<integer<40
+    assert 0<integer<41
     gx = {'GALFA'+str(integer): 
     (
         'D:/SC_241.66_28.675.best.fits', 
@@ -79,6 +79,7 @@ def GALFAx(integer):
 
 '''
 def GALFAxN(integer):
+    #arXiv:0810.1283 #http://sites.google.com/site/galfahi/
     assert isinstance(integer, int)
     return 'GALFA'+str(integer), (
 
@@ -87,6 +88,10 @@ def GALFAxN(integer):
         np.log10,
         ['_AVG', '_MED', '_TOT']
     )
+
+def ONOFF(integer):
+    assert isinstance(integer, int)
+
 '''
 
 #-----------------------------------------------------------------------------------------
@@ -106,11 +111,14 @@ class Cloud:
 
     @staticmethod
     def on_and_off_masks_from_HDU(hdu, transpose=False):
-        cloud = Cloud(hdu)
-        if transpose:
-            cloud.mask.T, myfavoritefiber.off_fiber(cloud.mask.T)
+        if isinstance(hdu, fits.BinTableHDU) or isinstance(hdu, fits.ImageHDU):
+            cloud = Cloud(hdu)
+            if transpose:
+                cloud.mask.T, myfavoritefiber.off_fiber(cloud.mask.T)
+            else:
+                return cloud.mask, myfavoritefiber.off_fiber(cloud.mask)
         else:
-            return cloud.mask, myfavoritefiber.off_fiber(cloud.mask)
+            raise ValueError('Your hdu could not be resolved to a known type in on_and_off_masks_from_HDU()')
 
     @staticmethod
     def nonzero_data_from_HDU(hdu, transpose=False):
@@ -150,11 +158,6 @@ class Cloud:
         return fits.BinTableHDU(data=cols, header=hdr)
 
     def as_HDU(self, sparse=False):
-        '''
-        hdr = fits.Header()
-        for k,v in Cloud.functions.iteritems():
-            hdr[k] = (v[0](self), v[1])
-        '''
         if sparse:
             return self.as_BinTableHDU()
         else:
@@ -165,7 +168,7 @@ class Cloud:
         if isinstance(list_of_points, Cloud):
             self.points = list_of_points.points
         elif isinstance(list_of_points, fits.BinTableHDU) or isinstance(list_of_points, fits.ImageHDU):
-            min_coord = list_of_points.header['MIN_X'],list_of_points.header['MIN_Y'] 
+            min_coord = (list_of_points.header['MIN_X'], list_of_points.header['MIN_Y'])
             rel_coords = zip(*Cloud.nonzero_data_from_HDU(list_of_points, transpose=False))
             self.points = [rel_add(min_coord, rel_coord) for rel_coord in rel_coords]
             del min_coord, rel_coords
@@ -237,6 +240,18 @@ sources = {
         np.load,
         identity,
         ['_MAX', '_MIN']
+    ),
+    'L': (
+        'D:/SC_241_2d_ls.npy',
+        np.load,
+        identity,
+        ['_MAX', '_MIN']
+    ),
+    '': (
+        None,
+        identity,
+        identity,
+        list(Cloud.functions.iterkeys())
     )
 }
 
@@ -270,15 +285,16 @@ def include(dictionary):
         except Exception as e:
             print 'WARNING: Unable to find source data for '+str(k)+' keyword using '+str(v[0])+' as an initial input.. (Modify config.py for better results!)'
             print repr(e)
-
+'''
 include({'': (
     None,
     identity,
     identity,
     list(Cloud.functions.iterkeys())
 )})
+'''
 include(sources)
-#for i in range(17,23): include(GALFAx(i))
+#for i in range(10,25): include(GALFAx(i))
 
 print '} '
 print 'Finishing config.py '
