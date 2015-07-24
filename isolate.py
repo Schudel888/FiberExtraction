@@ -100,7 +100,7 @@ def update_onoff_key(filaments_filename, key, force=False):
     
     def do_update(hdu_list, key, force):
         suffix = '_ONOFF'
-
+        '''
         if not SILENT:
             print 'Updating key:', key+suffix, 'in', hdu_list.filename()
 
@@ -108,21 +108,27 @@ def update_onoff_key(filaments_filename, key, force=False):
                 print key+suffix+' keyword found in filament header...'
                 if 'y' not in raw_input('Overwrite? ([no]/yes):  '):
                     return hdu_list, key
-
+        '''
         if key in config.source_data:
             correlation_data = config.source_data[key]
         else:
             raise KeyError('No source_data for key: '+key+' in config.source_data')
 
         #print key, key+suffix, correlation_data.shape
-        N = len(hdu_list)+1
+        N = len(hdu_list)
+        j = 0
         for i, hdu in enumerate(hdu_list[skip:]):
-            if i%10==0:
-                rht.update_progress(float(i/N), message='Updating key:'+key+suffix+str(i))
-
+            rht.update_progress(float(i/N), message=key+suffix+': '+str(i))
+            if j>=100 and (i%100)==0 and i != 0:
+                hdu_list.flush()
+                j = 0
             hdr = hdu.header
-            ONMASK, OFFMASK = config.Cloud.on_and_off_masks_from_HDU(hdu, transpose=True)
+            if not force and (key+suffix+'_AVG' in hdr) and (key+suffix+'_MED' in hdr) and (key+suffix+'_TOT' in hdr) and (key+suffix in hdr): 
+                continue
+            else:
+                j += 1
 
+            ONMASK, OFFMASK = config.Cloud.on_and_off_masks_from_HDU(hdu, transpose=True)
             on_nonzero = np.nonzero(ONMASK)
             off_nonzero = np.nonzero(OFFMASK)
 

@@ -20,7 +20,7 @@ import config
 if __name__ == "__main__":
 
     #all_available_integers = range(0,4)+range(10,25)+range(33,41)
-    available_integers = [0]+range(10,25)+range(33,37)
+    available_integers = [36]#[0]+range(10,25)+range(33,37)
     
     DIRECTORY = 'D:/'
     prefix = DIRECTORY+'SC_241.66_28.675.best_'
@@ -39,6 +39,7 @@ if __name__ == "__main__":
     for i in available_integers:
         print 'Started:', str(i)
 
+        isolate.SILENT = True
         xyt_filename = prefix + str(i) + insuffix
         assert isolate.is_xyt_filename(xyt_filename)
 
@@ -53,20 +54,24 @@ if __name__ == "__main__":
 
         config.include(config.GALFAx(i))
 
-        isolate.update_onoff_key(hdu_list, key=_key, force=True)
-
+        isolate.SILENT = False
+        isolate.update_onoff_key(hdu_list, key=_key, force=False)
+        
         #_____________________________________________________________________________BAD PROGRAMMING
         NEWKEY = _key+'_ONOFF'
         config.applicable_methods[NEWKEY] = [''] #Jenky
         print 'Finished Updating', NEWKEY
 
-        _out_name = plot_dir+filaments_filename[len(DIRECTORY):-5]+'_'+NEWKEY
+        try:
+            _out_name = plot_dir+filaments_filename[len(DIRECTORY):-5]+'_'+NEWKEY
 
-        isolate.plot(hdu_list, key=NEWKEY, out_name=_out_name+'.png', show=True)
-        for cut_name, _cut in available_cuts:        
-            isolate.plot(hdu_list, key=NEWKEY, out_name=_out_name+cut_name+'.png', show=True, cut=_cut)
+            isolate.plot(hdu_list, key=NEWKEY, out_name=_out_name+'.png', show=True)
+            for cut_name, _cut in available_cuts:        
+                isolate.plot(hdu_list, key=NEWKEY, out_name=_out_name+cut_name+'.png', show=True, cut=_cut)
+                #TODO
             #TODO
-        #TODO
+        except Exception:
+            pass
 
         try:
             del config.applicable_methods[NEWKEY]

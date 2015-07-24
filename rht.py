@@ -116,59 +116,61 @@ def update_progress(progress, message='Progress:', final_message='Finished:'):
         # Allows time-sensitive jobs to be completed without timing overhead
         return 
 
-    if not 0.0 <= progress <= 1.0:
-        # Fast fail for values outside the allowed range
-        #raise ValueError('Progress value outside allowed value in update_progress') 
-        return
-        
-    #TODO_________________Slow Global Implementation
-    global start_time
-    global stop_time 
+    try:
+        if not 0.0 <= progress <= 1.0:
+            # Fast fail for values outside the allowed range
+            raise ValueError('Progress value outside allowed value in update_progress') 
+            
+        #TODO_________________Slow Global Implementation
+        global start_time
+        global stop_time 
 
-    # First call
-    if 0.0 == progress:
-        start_time = time.time()
-        stop_time = None
-        return
+        # First call
+        if 0.0 == progress:
+            start_time = time.time()
+            stop_time = None
+            return
 
-    # Second call
-    elif stop_time is None:
-        stop_time = start_time + (time.time() - start_time)/progress
+        # Second call
+        elif stop_time is None:
+            stop_time = start_time + (time.time() - start_time)/progress
 
-    # Randomly callable re-calibration
-    elif np.random.rand() > 0.98: 
-        stop_time = start_time + (time.time() - start_time)/progress
+        # Randomly callable re-calibration
+        elif np.random.rand() > 0.98: 
+            stop_time = start_time + (time.time() - start_time)/progress
 
-    # Normal Call with Progress
-    sec_remaining = int(stop_time - time.time())
-    if sec_remaining >= 60:
-        time_message = ' < ' + str(sec_remaining//60  +1) + 'min'
-    else:
-        time_message = ' < ' + str(sec_remaining +1) + 'sec'
-
-    length = int(0.55 * TEXTWIDTH)
-    messlen = TEXTWIDTH-(length+3)-len(time_message)
-    message = string.ljust(message, messlen)[:messlen]
-
-    p = int(length*progress/1.0) 
-    sys.stdout.write('\r{2} [{0}{1}]{3}'.format('#'*p, ' '*(length-p), message, time_message))
-    sys.stdout.flush()
-
-    # Final call
-    if p == length:
-        total = int(time.time()-start_time)
-        if total > 60:
-            time_message = ' ' + str(total//60) + 'min'
+        # Normal Call with Progress
+        sec_remaining = int(stop_time - time.time())
+        if sec_remaining >= 60:
+            time_message = ' < ' + str(sec_remaining//60  +1) + 'min'
         else:
-            time_message = ' ' + str(total) + 'sec'
-        
-        final_offset = TEXTWIDTH-len(time_message)
-        final_message = string.ljust(final_message, final_offset)[:final_offset]
-        sys.stdout.write('\r{0}{1}'.format(final_message, time_message))
+            time_message = ' < ' + str(sec_remaining +1) + 'sec'
+
+        length = int(0.55 * TEXTWIDTH)
+        messlen = TEXTWIDTH-(length+3)-len(time_message)
+        message = string.ljust(message, messlen)[:messlen]
+
+        p = int(length*progress/1.0) 
+        sys.stdout.write('\r{2} [{0}{1}]{3}'.format('#'*p, ' '*(length-p), message, time_message))
         sys.stdout.flush()
-        start_time = None
-        stop_time = None
-        print ''
+
+        # Final call
+        if p == length:
+            total = int(time.time()-start_time)
+            if total > 60:
+                time_message = ' ' + str(total//60) + 'min'
+            else:
+                time_message = ' ' + str(total) + 'sec'
+            
+            final_offset = TEXTWIDTH-len(time_message)
+            final_message = string.ljust(final_message, final_offset)[:final_offset]
+            sys.stdout.write('\r{0}{1}'.format(final_message, time_message))
+            sys.stdout.flush()
+            start_time = None
+            stop_time = None
+            print ''
+    except Exception:
+        pass
 
 #-----------------------------------------------------------------------------------------
 # Naming Conventions and Converisons
