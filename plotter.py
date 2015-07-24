@@ -20,19 +20,20 @@ import config
 if __name__ == "__main__":
 
     all_available_integers = range(0,4)+range(10,25)+range(33,41)
-    available_integers = range(10,25)
+    available_integers = [0]+range(10,25)+range(33,37)
     
-    prefix = 'D:/SC_241.66_28.675.best_'
+    DIRECTORY = 'D:/'
+    prefix = DIRECTORY+'SC_241.66_28.675.best_'
     insuffix = '_xyt_w75_s15_t70.fits'
-    plot_dir = 'D:/Plots/'
+    plot_dir = DIRECTORY+'Plots/'
 
     #outsuffix = '_xyt_w75_s15_t70_filaments.fits'
     #galfa = 'D:/SC_241.66_28.675.best.fits'
 
     #TODO DANGEROUS VARIABLES
-    DO_PLOTS = True
+    DO_PLOTS = False
     FORCE = False
-    isolate.SILENT = True 
+    isolate.SILENT = True
 
     available_cuts = [('_50', lambda h: h.header['B_MIN'] > 50.0)] #[(cut_name, _cut)]
 
@@ -75,10 +76,12 @@ if __name__ == "__main__":
                 isolate.update_key(hdu_list, _key, force=FORCE)
 
                 if DO_PLOTS:
-                    isolate.plot(hdu_list, key=_key, out_name=plot_dir+filaments_filename[:-5]+'_'+_key+'.png', show=False)
+                    _out_name = plot_dir+filaments_filename[len(DIRECTORY):-5]+'_'+_key
+                    print _out_name
+                    isolate.plot(hdu_list, key=_key, out_name=_out_name+'.png')
                 
                     for cut_name, _cut in available_cuts:        
-                        isolate.plot(hdu_list, key=_key, out_name=plot_dir+filaments_filename[:-5]+'_'+_key+cut_name+'.png', cut=_cut, show=False)
+                        isolate.plot(hdu_list, key=_key, out_name=_out_name+cut_name+'.png', cut=_cut)
                                             
                         #TODO
 

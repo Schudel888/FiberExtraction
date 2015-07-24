@@ -67,7 +67,7 @@ def default_open(filename, mode='readonly'):
 
 def GALFAx(integer):
     assert isinstance(integer, int)
-    assert 0<integer<41
+    assert 0<=integer<=40
     gx = {'GALFA'+str(integer): 
     (
         'D:/SC_241.66_28.675.best.fits', 
@@ -113,10 +113,12 @@ class Cloud:
     def on_and_off_masks_from_HDU(hdu, transpose=False):
         if isinstance(hdu, fits.BinTableHDU) or isinstance(hdu, fits.ImageHDU):
             cloud = Cloud(hdu)
+            on_mask = cloud.mask
             if transpose:
-                cloud.mask.T, myfavoritefiber.off_fiber(cloud.mask.T)
-            else:
-                return cloud.mask, myfavoritefiber.off_fiber(cloud.mask)
+                on_mask = on_mask.T
+            off_mask = myfavoritefiber.off_fiber(on_mask)
+            #off_mask #TODO 
+            return on_mask, off_mask 
         else:
             raise ValueError('Your hdu could not be resolved to a known type in on_and_off_masks_from_HDU()')
 
@@ -229,7 +231,7 @@ sources = {
         np.log10,
         ['_AVG', '_MED', '_TOT']
     ),
-    'GALFA0': (
+    'GALFA': (
         'D:/SC_241.66_28.675.best.fits', 
         chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(np.s_[16:25]), lambda x: np.nansum(x, axis=0), lambda x: np.multiply(x, 1.823E18)]),
         np.log10,
@@ -264,16 +266,15 @@ def clear():
     applicable_methods.clear()
     post_processing.clear()
 
-def exclude(*keys):
-    for key in keys:
-        if key in sources:
-            del sources[key]
-        if key in source_data:
-            del source_data[key]
-        if key in post_processing:
-            del post_processing[key]
-        if key in applicable_methods:
-            del applicable_methods[key]
+def exclude(key):
+    if key in sources:
+        del sources[key]
+    if key in source_data:
+        del source_data[key]
+    if key in post_processing:
+        del post_processing[key]
+    if key in applicable_methods:
+        del applicable_methods[key]
         
 def include(dictionary):
     assert isinstance(dictionary, dict)
@@ -293,8 +294,9 @@ include({'': (
     list(Cloud.functions.iterkeys())
 )})
 '''
-include(sources)
-#for i in range(10,25): include(GALFAx(i))
+#include(sources)
+#for i in [0]+range(10,25)+range(33,37):
+#include(GALFAx(i))
 
 print '} '
 print 'Finishing config.py '

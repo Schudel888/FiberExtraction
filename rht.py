@@ -118,8 +118,9 @@ def update_progress(progress, message='Progress:', final_message='Finished:'):
 
     if not 0.0 <= progress <= 1.0:
         # Fast fail for values outside the allowed range
-        raise ValueError('Progress value outside allowed value in update_progress') 
-
+        #raise ValueError('Progress value outside allowed value in update_progress') 
+        return
+        
     #TODO_________________Slow Global Implementation
     global start_time
     global stop_time 
