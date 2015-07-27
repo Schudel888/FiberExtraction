@@ -100,7 +100,7 @@ def update_onoff_key(filaments_filename, key, force=False):
     
     def do_update(hdu_list, key, force):
         suffix = '_ONOFF'
-        '''
+        
         if not SILENT:
             print 'Updating key:', key+suffix, 'in', hdu_list.filename()
 
@@ -108,7 +108,7 @@ def update_onoff_key(filaments_filename, key, force=False):
                 print key+suffix+' keyword found in filament header...'
                 if 'y' not in raw_input('Overwrite? ([no]/yes):  '):
                     return hdu_list, key
-        '''
+        
         if key in config.source_data:
             correlation_data = config.source_data[key]
         else:
@@ -116,24 +116,19 @@ def update_onoff_key(filaments_filename, key, force=False):
 
         #print key, key+suffix, correlation_data.shape
         N = len(hdu_list)
-        j = 0
         for i, hdu in enumerate(hdu_list[skip:]):
             rht.update_progress(float(i/N), message=key+suffix+': '+str(i))
-            if j>=100 and (i%100)==0 and i != 0:
-                hdu_list.flush()
-                j = 0
             hdr = hdu.header
             if not force and (key+suffix+'_AVG' in hdr) and (key+suffix+'_MED' in hdr) and (key+suffix+'_TOT' in hdr) and (key+suffix in hdr): 
                 continue
-            else:
-                j += 1
 
-            ONMASK, OFFMASK = config.Cloud.on_and_off_masks_from_HDU(hdu, transpose=True)
+            ONMASK, OFFMASK, LL, UR = config.Cloud.on_and_off_masks_from_HDU(hdu, transpose=True, shape=correlation_data.shape)
+            #mask_slice = np.s_[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1]
+            mask_slice = np.s_[LL[1]:UR[1]+1, LL[0]:UR[0]+1] 
+
+            inset = correlation_data[mask_slice] 
             on_nonzero = np.nonzero(ONMASK)
             off_nonzero = np.nonzero(OFFMASK)
-
-            mask_slice = np.s_[hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1]
-            inset = correlation_data[mask_slice] 
 
             on_avg = np.nanmean(inset[on_nonzero])
             off_avg = np.nanmean(inset[off_nonzero])
@@ -323,9 +318,10 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
                     #try:
                     ##mask = displays[key+suffix][hdr['MIN_X']:hdr['MAX_X']+1, hdr['MIN_Y']:hdr['MAX_Y']+1]
                     ##displays[key+suffix][hdr['MIN_Y']:hdr['MAX_Y']+1, hdr['MIN_X']:hdr['MAX_X']+1][config.Cloud.nonzero_data_from_HDU(hdu, transpose=True)].fill(datasets[key+suffix][i])
-                    thing = displays[title][mask_slice]
-                    other_thing = datasets[title][i]
-                    thing[mask_nonzero] = other_thing #datasets[title][i] #.fill(datasets[title][i]) 
+                    #thing = displays[title][mask_slice]
+                    #other_thing = datasets[title][i]
+                    #thing[mask_nonzero] = other_thing #datasets[title][i] #.fill(datasets[title][i]) 
+                    displays[title][mask_slice][mask_nonzero] = datasets[title][i]
                     #except Exception as e:
                     #print e #TODO
                     #print 'Failed to plot data from (1-indexed) HDU:', i+1+skip, title
@@ -338,7 +334,8 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
             for i, title in enumerate(titles):
                 ax1 = plt.subplot(gs[1+r*i:r*(i+1),0:-4]) 
                 ax2 = plt.subplot(gs[1+r*i:r*(i+1)-1,-3:-1])
-                ax2.hist(datasets[title], bins=50, orientation='horizontal', histtype='stepfilled')
+                RANGE = (np.nanmin(datasets[title]), np.nanmax(datasets[title]))
+                ax2.hist(datasets[title], bins=50, range=RANGE, orientation='horizontal', histtype='stepfilled')
                 plt.colorbar(ax1.imshow(displays[title], cmap = "YlOrRd"), ax=ax2, fraction=0.10)
                 plt.title(title, fontsize=8)
         

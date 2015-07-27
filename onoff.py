@@ -7,7 +7,6 @@
 #-----------------------------------------------------------------------------------------
 #import os
 import isolate
-
 import config
 #-----------------------------------------------------------------------------------------
 # Plotting Functions
@@ -20,7 +19,7 @@ import config
 if __name__ == "__main__":
 
     #all_available_integers = range(0,4)+range(10,25)+range(33,41)
-    available_integers = [36]#[0]+range(10,25)+range(33,37)
+    available_integers = [0]+range(10,25)+range(33,37)
     
     DIRECTORY = 'D:/'
     prefix = DIRECTORY+'SC_241.66_28.675.best_'
@@ -55,28 +54,33 @@ if __name__ == "__main__":
         config.include(config.GALFAx(i))
 
         isolate.SILENT = False
-        isolate.update_onoff_key(hdu_list, key=_key, force=False)
-        
+        isolate.update_onoff_key(hdu_list, key=_key, force=True)
         #_____________________________________________________________________________BAD PROGRAMMING
         NEWKEY = _key+'_ONOFF'
-        config.applicable_methods[NEWKEY] = [''] #Jenky
+        #config.applicable_methods[NEWKEY] = ['_AVG', '_MED', '_TOT'] #Jenky
+        config.include({NEWKEY: (
+            None, 
+            config.identity,
+            config.abs_log10,
+            ['_AVG', '_MED', '_TOT']
+        )})
         print 'Finished Updating', NEWKEY
+        _out_name = plot_dir+filaments_filename[len(DIRECTORY):-5]+'_'+NEWKEY
 
         try:
-            _out_name = plot_dir+filaments_filename[len(DIRECTORY):-5]+'_'+NEWKEY
-
-            isolate.plot(hdu_list, key=NEWKEY, out_name=_out_name+'.png', show=True)
+            isolate.plot(hdu_list, key=NEWKEY, out_name=_out_name+'.png', show=False)
             for cut_name, _cut in available_cuts:        
-                isolate.plot(hdu_list, key=NEWKEY, out_name=_out_name+cut_name+'.png', show=True, cut=_cut)
+                isolate.plot(hdu_list, key=NEWKEY, out_name=_out_name+cut_name+'.png', show=False, cut=_cut)
                 #TODO
             #TODO
         except Exception:
             pass
 
         try:
-            del config.applicable_methods[NEWKEY]
-            config.exclude(_key)
             hdu_list.close()
+            #del config.applicable_methods[NEWKEY]
+            config.exclude(NEWKEY)
+            config.exclude(_key)
         except Exception:
             pass
 

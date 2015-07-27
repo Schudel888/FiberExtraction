@@ -58,6 +58,8 @@ def bridged(funca, funcb):
 def rel_add((a,b), (c,d)):
     return a+c,b+d
 
+abs_log10 = chained([np.abs, np.log10])
+
 def default_open(filename, mode='readonly'):
     print 'Accessing: '+filename+' '
     #try:
@@ -72,7 +74,7 @@ def GALFAx(integer):
     (
         'D:/SC_241.66_28.675.best.fits', 
         lambda x: np.nan_to_num(default_open(x)[0].data[integer]).clip(0.0, np.inf)*1.823E18,
-        np.log10,
+        abs_log10,
         ['_AVG', '_MED', '_TOT']
     )}
     return gx
@@ -85,7 +87,7 @@ def GALFAxN(integer):
 
         'D:/SC_241.66_28.675.best.fits', 
         lambda x: np.nan_to_num(default_open(x)[0].data[22]).clip(0.0, np.inf)*1.823E18,
-        np.log10,
+        abs_log10,
         ['_AVG', '_MED', '_TOT']
     )
 
@@ -110,15 +112,23 @@ class Cloud:
     }
 
     @staticmethod
-    def on_and_off_masks_from_HDU(hdu, transpose=False):
+    def on_and_off_masks_from_HDU(hdu, transpose=False, shape=(0,0)):
         if isinstance(hdu, fits.BinTableHDU) or isinstance(hdu, fits.ImageHDU):
+            hdr = hdu.header
+            x_buffer = min(min(hdr['MIN_X'], shape[1]-hdr['MAX_X']-1), hdr['NAXIS2']//2)
+            y_buffer = min(min(hdr['MIN_Y'], shape[0]-hdr['MAX_Y']-1), hdr['NAXIS1']//2)
+            LL = (hdr['MIN_X']-x_buffer, hdr['MIN_Y']-y_buffer)
+            UR = (hdr['MAX_X']+x_buffer, hdr['MAX_Y']+y_buffer)
+            
             cloud = Cloud(hdu)
-            on_mask = cloud.mask
+            #on_mask = cloud.mask
+            on_mask = np.zeros((hdr['NAXIS2']+2*x_buffer, hdr['NAXIS1']+2*y_buffer), dtype=np.int_)
+            on_mask[x_buffer:-x_buffer, y_buffer:-y_buffer] = cloud.mask
             if transpose:
                 on_mask = on_mask.T
             off_mask = myfavoritefiber.off_fiber(on_mask)
             #off_mask #TODO 
-            return on_mask, off_mask 
+            return on_mask, off_mask, LL, UR
         else:
             raise ValueError('Your hdu could not be resolved to a known type in on_and_off_masks_from_HDU()')
 
@@ -228,13 +238,13 @@ sources = {
     'COLDENS': (
         'D:/LAB_corrected_coldens.fits', 
         chained([default_open, operator.itemgetter(0), operator.attrgetter('data')]), 
-        np.log10,
+        abs_log10,
         ['_AVG', '_MED', '_TOT']
     ),
     'GALFA': (
         'D:/SC_241.66_28.675.best.fits', 
         chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(np.s_[16:25]), lambda x: np.nansum(x, axis=0), lambda x: np.multiply(x, 1.823E18)]),
-        np.log10,
+        abs_log10,
         ['_AVG', '_MED', '_TOT']
     ),
     'B': (

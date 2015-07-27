@@ -46,16 +46,16 @@ def gromask(mask):
     return gromask
     
 def off_fiber(mask):
-    
     masksum = np.sum(mask)
     off = copy.copy(mask)
     
-    while np.sum(off - mask) < masksum:
+    while not off.all() and np.sum(off - mask) < masksum:
         off = gromask(off)
     
     off = off - mask
         
     return off
+
  
 """Display fiber on/off"""
 def showspectra(): 
