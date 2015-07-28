@@ -58,8 +58,6 @@ def bridged(funca, funcb):
 def rel_add((a,b), (c,d)):
     return a+c,b+d
 
-abs_log10 = chained([np.abs, np.log10])
-
 def default_open(filename, mode='readonly'):
     print 'Accessing: '+filename+' '
     #try:
@@ -74,7 +72,7 @@ def GALFAx(integer):
     (
         'D:/SC_241.66_28.675.best.fits', 
         lambda x: np.nan_to_num(default_open(x)[0].data[integer]).clip(0.0, np.inf)*1.823E18,
-        abs_log10,
+        np.log10,
         ['_AVG', '_MED', '_TOT']
     )}
     return gx
@@ -87,7 +85,7 @@ def GALFAxN(integer):
 
         'D:/SC_241.66_28.675.best.fits', 
         lambda x: np.nan_to_num(default_open(x)[0].data[22]).clip(0.0, np.inf)*1.823E18,
-        abs_log10,
+        np.log10,
         ['_AVG', '_MED', '_TOT']
     )
 
@@ -127,7 +125,15 @@ class Cloud:
             if transpose:
                 on_mask = on_mask.T
             off_mask = myfavoritefiber.off_fiber(on_mask)
-            #off_mask #TODO 
+            #return on_mask, off_mask, LL, UR
+            #from matplotlib import pyplot as plt
+            #plt.imshow(on_mask+2*off_mask)
+            #plt.show()
+
+            #TODO Second Pass
+            off_mask = myfavoritefiber.off_fiber(on_mask+off_mask)
+            #plt.imshow(on_mask+2*off_mask)
+            #plt.show()
             return on_mask, off_mask, LL, UR
         else:
             raise ValueError('Your hdu could not be resolved to a known type in on_and_off_masks_from_HDU()')
@@ -238,13 +244,13 @@ sources = {
     'COLDENS': (
         'D:/LAB_corrected_coldens.fits', 
         chained([default_open, operator.itemgetter(0), operator.attrgetter('data')]), 
-        abs_log10,
+        np.log10,
         ['_AVG', '_MED', '_TOT']
     ),
     'GALFA': (
         'D:/SC_241.66_28.675.best.fits', 
         chained([default_open, operator.itemgetter(0), operator.attrgetter('data'), operator.itemgetter(np.s_[16:25]), lambda x: np.nansum(x, axis=0), lambda x: np.multiply(x, 1.823E18)]),
-        abs_log10,
+        np.log10,
         ['_AVG', '_MED', '_TOT']
     ),
     'B': (
