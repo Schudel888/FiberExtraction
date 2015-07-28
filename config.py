@@ -58,13 +58,11 @@ def bridged(funca, funcb):
 def rel_add((a,b), (c,d)):
     return a+c,b+d
 
-def default_open(filename, mode='readonly'):
+def default_open(filename, mode='readonly', memmap=True, checksum=True):
     print 'Accessing: '+filename+' '
-    #try:
-    return fits.open(filename, mode=mode, memmap=True, save_backup=False, checksum=True, ignore_missing_end=True)
-    #except Exception:
-    #return fits.open(filename, mode=mode, memmap=False, save_backup=False, checksum=True, ignore_missing_end=True)
-
+    #save_backup=(mode != 'readonly')
+    return fits.open(filename, mode=mode, memmap=memmap, save_backup=False, checksum=checksum, ignore_missing_end=True)
+    
 def GALFAx(integer):
     assert isinstance(integer, int)
     assert 0<=integer<=40

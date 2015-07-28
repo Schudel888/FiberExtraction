@@ -20,7 +20,7 @@ import config
 if __name__ == "__main__":
 
     #all_available_integers = range(0,4)+range(10,25)+range(33,41)
-    available_integers = range(37,41)#[18,19,20,21,22]#[0]+range(10,25)+range(33,37)
+    available_integers = [18,19,20,21,22]#[0]+range(10,25)+range(33,37)
     
     DIRECTORY = 'D:/'
     prefix = DIRECTORY+'SC_241.66_28.675.best_'
