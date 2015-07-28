@@ -5,7 +5,7 @@ import matplotlib
 matplotlib.rcParams['backend'] = "Qt4Agg"
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
-import pyfits
+#import pyfits
 import pylab
 import time
 import copy
@@ -27,7 +27,8 @@ import random
 
 def get_filament_data(channel, verbose = False):
 
-    root = "/Volumes/DataDavy/GALFA/lowell_fibers_project/"
+    #root = "/Volumes/DataDavy/GALFA/lowell_fibers_project/"
+    root = 'D:/'
     fn = root+"SC_241.66_28.675.best_"+str(channel)+"_xyt_w75_s15_t70_filaments.fits"
     
     hdu = fits.open(fn)
@@ -80,14 +81,14 @@ def plot_onoff_column_avg_hist(chans):
         #ax1.hist(onoff_avg[~np.isnan(onoff_avg)], label = r""+str(_c), bins = 200, histtype = "step")
         #ax2.hist(onoff_med[~np.isnan(onoff_med)], label = r""+str(_c), bins = 200, histtype = "step")
         
-        ax1.hist(onoff_avg[(np.isnan(onoff_avg) == False) & (bmean > 50) & (onoff_avg > 1E18)], label = r""+str(_c), bins = 10, histtype = "step")
-        ax2.hist(onoff_med[(np.isnan(onoff_avg) == False) & (bmean > 50) & (onoff_avg > 1E18)], label = r""+str(_c), bins = 10, histtype = "step")
+        ax1.hist(onoff_avg[(np.isnan(onoff_avg) == False) & (bmean > 50) & (onoff_avg > 8E18)], label = r""+str(_c), bins = 10, histtype = "step")
+        ax2.hist(onoff_med[(np.isnan(onoff_avg) == False) & (bmean > 50) & (onoff_avg > 8E18)], label = r""+str(_c), bins = 10, histtype = "step")
     
     
     ax1.legend()
     ax2.legend()
-    ax1.set_title(r"$\mathrm{Average}$ $\mathrm{on - off}$ $N_{HI}$ $b > 70$", size = 20)
-    ax2.set_title(r"$\mathrm{Median}$ $\mathrm{on - off}$ $N_{HI}$ $b > 70$", size = 20)
+    ax1.set_title(r"$\mathrm{Average}$ $\mathrm{on - off}$ $N_{HI}$ $b > 50$", size = 20)
+    ax2.set_title(r"$\mathrm{Median}$ $\mathrm{on - off}$ $N_{HI}$ $b > 50$", size = 20)
     #ax1.semilogx()
     #ax2.semilogx()
     ax1.set_xscale('log')

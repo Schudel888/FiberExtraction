@@ -9,6 +9,7 @@
 import numpy as np
 import isolate
 import config
+
 #-----------------------------------------------------------------------------------------
 # Plotting Functions
 #-----------------------------------------------------------------------------------------
@@ -20,9 +21,9 @@ import config
 if __name__ == "__main__":
 
     #all_available_integers = range(0,4)+range(10,25)+range(33,41)
-    available_integers = range(37,41)#[18,19,20,21,22]#[0]+range(10,25)+range(33,37)
+    available_integers = [0]+range(10,25)+range(33,37)
     
-    DIRECTORY = 'D:/'
+    DIRECTORY = 'D:/' #"/Volumes/DataDavy/GALFA/lowell_fibers_project/"
     prefix = DIRECTORY+'SC_241.66_28.675.best_'
     insuffix = '_xyt_w75_s15_t70.fits'
     plot_dir = DIRECTORY+'Plots/'
@@ -30,10 +31,8 @@ if __name__ == "__main__":
     #outsuffix = '_xyt_w75_s15_t70_filaments.fits'
     #galfa = DIRECTORY+'SC_241.66_28.675.best.fits'
 
-    available_cuts = [('_50', lambda h: h.header['B_MIN'] > 50.0)] #[(cut_name, _cut)]
-
     print ''
-    print 'Starting onoff.py'
+    print 'Starting tablemaker.py'
     print '{'
 
     for i in available_integers:
@@ -56,7 +55,7 @@ if __name__ == "__main__":
         config.include(config.GALFAx(i))
 
         isolate.SILENT = False
-        isolate.update_onoff_key(hdu_list, key=_key, force=True)
+        isolate.update_onoff_key(hdu_list, key=_key, force=False)
 
         NEWKEY = _key+'_ONOFF'
         config.include({NEWKEY: (
@@ -71,8 +70,8 @@ if __name__ == "__main__":
         SHOW = False
         try:
             isolate.plot(hdu_list, key=NEWKEY, out_name=_out_name+'.png', show=SHOW)
-            for cut_name, _cut in available_cuts:        
-                isolate.plot(hdu_list, key=NEWKEY, out_name=_out_name+cut_name+'.png', show=SHOW, cut=_cut)
+            
+
             print 'Finished Plotting', NEWKEY
         except Exception:
             print 'Warning: Failed to Plot', NEWKEY
@@ -94,7 +93,7 @@ if __name__ == "__main__":
         #TODO
 
     print '} '
-    print 'Finishing onoff.py '
+    print 'Finishing tablemaker.py '
     print ''
 
     #TODO

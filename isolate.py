@@ -337,7 +337,7 @@ def plot(filaments_filename, key=None, out_name=None, show=True, cut=config.pass
                 RANGE = (np.nanmin(datasets[title]), np.nanmax(datasets[title]))
                 ax2.hist(datasets[title], bins=50, range=RANGE, orientation='horizontal', histtype='stepfilled')
                 plt.colorbar(ax1.imshow(displays[title], cmap = "YlOrRd"), ax=ax2, fraction=0.10)
-                plt.title(title, fontsize=8)
+                plt.title(title.replace('_', '\_'), fontsize=8)
         
         else:
             raise KeyError('Unable to plot data using the given key: '+str(key))
