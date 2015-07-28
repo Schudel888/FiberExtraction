@@ -25,7 +25,7 @@ prefix = DIRECTORY+'SC_241.66_28.675.best_'
 insuffix = '_xyt_w75_s15_t70.fits'
 plot_dir = DIRECTORY+'Plots/'
 
-TABLENAME = prefix+'_filaments.fits'
+TABLENAME = prefix+'_table.fits'
 
 def quick_hdu_list(i):
     #READONLY
@@ -46,8 +46,7 @@ def quick_hdu_list(i):
 def plot_cut(cut=config.passive_constant(True)):
     pass
 
-
-
+    #TODO
 
 #-----------------------------------------------------------------------------------------
 # Command Line Mode
